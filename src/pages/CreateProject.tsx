@@ -28,7 +28,6 @@ export function CreateProject({ navigate }: CreateProjectProps) {
       if (!user) return;
       try {
         // Fetch all projects and filter for user's projects created today
-        // In a real app, this should be a backend check
         const projects = await projectService.getAll();
         const myProjects = projects.filter((p: any) => p.ownerId === user.id || p.ownerId?.id === user.id || p.ownerId?._id === user.id);
         const todayProjects = myProjects.filter((p: any) => isSameDay(new Date(p.createdAt), new Date()));
