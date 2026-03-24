@@ -11,7 +11,6 @@ export function Admin() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // In MERN, the user object from useAuth will have the role
     if (user?.role !== 'admin') return;
 
     const fetchData = async () => {
@@ -36,8 +35,6 @@ export function Admin() {
   const handleDeleteUser = async (userId: string) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
     try {
-      // We need to add a deleteUser to adminService if it doesn't exist
-      // For now, let's assume it's there or we'll add it
       await adminService.deleteUser(userId);
       setUsers(users.filter(u => u.id !== userId));
     } catch (err) {
