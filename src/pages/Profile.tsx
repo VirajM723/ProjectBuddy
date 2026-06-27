@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { UserProfile, ContributionLog, Endorsement, Project } from '../types';
 import { useAuth } from '../App';
 import { Heatmap } from '../components/Heatmap';
-import { Github, Linkedin, ExternalLink, Award, Plus, Trash2, Edit3, Save, X, Phone, Rocket, CheckCircle, XCircle } from 'lucide-react';
+import { Github, Linkedin, ExternalLink, Award, Plus, Trash2, Edit3, Save, X, Phone, Rocket, CheckCircle, XCircle, Camera } from 'lucide-react';
 import { userService, logService, endorsementService, projectService } from '../services/api';
 
 interface ProfileProps {
@@ -11,7 +11,7 @@ interface ProfileProps {
 }
 
 export function Profile({ userId, navigate }: ProfileProps) {
-  const { user } = useAuth();
+  const { user, updateProfileState } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [logs, setLogs] = useState<ContributionLog[]>([]);
   const [endorsements, setEndorsements] = useState<Endorsement[]>([]);
@@ -82,12 +82,32 @@ export function Profile({ userId, navigate }: ProfileProps) {
     fetchData();
   }, [userId, user, isOwnProfile]);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Please select an image smaller than 2MB. This keeps profile loading fast!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result as string;
+      setEditData(prev => ({ ...prev, profileImage: base64String }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = async () => {
     if (!userId) return;
     try {
-      await userService.updateProfile(editData);
-      setProfile({ ...profile!, ...editData });
+      const updated = await userService.updateProfile(editData);
+      setProfile(updated);
       setIsEditing(false);
+      if (isOwnProfile && updateProfileState) {
+        updateProfileState(updated);
+      }
     } catch (err) {
       console.error("Save error:", err);
     }
@@ -150,12 +170,31 @@ export function Profile({ userId, navigate }: ProfileProps) {
       <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-32 bg-indigo-600/5"></div>
         <div className="relative z-10 flex flex-col md:flex-row items-center md:items-end gap-6">
-          <img 
-            src={profile.profileImage || `https://picsum.photos/seed/${profile.id}/120/120`} 
-            alt={profile.name} 
-            className="w-32 h-32 rounded-3xl border-4 border-white shadow-lg object-cover"
-            referrerPolicy="no-referrer"
-          />
+          <div className="relative group/avatar">
+            <img 
+              src={(isEditing ? editData.profileImage : profile.profileImage) || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>'} 
+              alt={profile.name} 
+              className="w-32 h-32 rounded-3xl border-4 border-white shadow-lg object-cover bg-white"
+              referrerPolicy="no-referrer"
+            />
+            {isEditing && (
+              <label 
+                htmlFor="profile-pic-upload" 
+                className="absolute inset-0 bg-black/40 rounded-3xl border-4 border-transparent flex flex-col items-center justify-center text-white cursor-pointer opacity-0 group-hover/avatar:opacity-100 transition-opacity duration-200"
+                title="Upload Photo (Click to select)"
+              >
+                <Camera className="w-6 h-6 mb-1 text-white" />
+                <span className="text-[10px] font-bold text-white uppercase tracking-wider">Upload</span>
+                <input 
+                  type="file" 
+                  id="profile-pic-upload" 
+                  accept="image/*" 
+                  onChange={handleFileChange} 
+                  className="hidden" 
+                />
+              </label>
+            )}
+          </div>
           <div className="flex-1 text-center md:text-left">
             <div className="flex flex-col md:flex-row md:items-center gap-2 mb-2">
               <h1 className="text-3xl font-extrabold text-slate-900">{profile.name}</h1>
@@ -195,6 +234,16 @@ export function Profile({ userId, navigate }: ProfileProps) {
         <div className="mt-8 flex flex-wrap gap-4 justify-center md:justify-start">
           {isEditing ? (
             <div className="flex flex-col gap-4 w-full max-w-md">
+              <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200" title="Paste any direct image URL (optional)">
+                <Camera className="w-5 h-5 text-indigo-500" />
+                <input 
+                  type="text" 
+                  value={editData.profileImage || ''} 
+                  onChange={(e) => setEditData({ ...editData, profileImage: e.target.value })}
+                  placeholder="Paste direct profile image URL (optional)"
+                  className="bg-transparent outline-none text-sm flex-1 font-medium placeholder-slate-400"
+                />
+              </div>
               <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
                 <Github className="w-5 h-5 text-slate-400" />
                 <input 
@@ -296,11 +345,15 @@ export function Profile({ userId, navigate }: ProfileProps) {
                       {skill}
                     </div>
                     <div className="flex -space-x-2">
-                      {skillEndorsements.slice(0, 5).map(e => (
-                        <div key={e.id} className="w-8 h-8 rounded-full border-2 border-white bg-indigo-100 flex items-center justify-center text-[10px] font-bold text-indigo-600">
-                          {e.endorsedBy.slice(0, 2).toUpperCase()}
-                        </div>
-                      ))}
+                      {skillEndorsements.slice(0, 5).map(e => {
+                        const endorserName = typeof e.endorsedBy === 'object' ? e.endorsedBy.name : 'User';
+                        const initials = endorserName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+                        return (
+                          <div key={e.id} className="w-8 h-8 rounded-full border-2 border-white bg-indigo-100 flex items-center justify-center text-[10px] font-bold text-indigo-600" title={endorserName}>
+                            {initials}
+                          </div>
+                        );
+                      })}
                       {skillEndorsements.length > 5 && (
                         <div className="w-8 h-8 rounded-full border-2 border-white bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-600">
                           +{skillEndorsements.length - 5}

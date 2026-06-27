@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Project, UserProfile, CollaborationRequest } from '../types';
 import { useAuth } from '../App';
-import { Calendar, Users, Tag, Briefcase, Clock, Send, CheckCircle, XCircle, Github, Linkedin } from 'lucide-react';
-import { format } from 'date-fns';
+import { Calendar, Users, Tag, Briefcase, Clock, Send, CheckCircle, XCircle, Github, Linkedin, MessageSquare, Plus, Activity, Star } from 'lucide-react';
+import { format, formatDistanceToNow } from 'date-fns';
 import Markdown from 'react-markdown';
-import { projectService, userService, collaborationService, logService } from '../services/api';
+import { projectService, userService, collaborationService, logService, chatService } from '../services/api';
+import { io, Socket } from 'socket.io-client';
+
+const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>';
 
 interface ProjectDetailsProps {
   projectId: string;
@@ -21,6 +24,168 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
   const [existingRequest, setExistingRequest] = useState<CollaborationRequest | null>(null);
   const [requests, setRequests] = useState<CollaborationRequest[]>([]);
   const [requesterProfiles, setRequesterProfiles] = useState<Record<string, UserProfile>>({});
+
+  // Real-time Chat and Milestones states
+  const [activeTab, setActiveTab] = useState<'details' | 'chat' | 'milestones'>('details');
+  const [messages, setMessages] = useState<any[]>([]);
+  const [chatRoomId, setChatRoomId] = useState<string | null>(null);
+  const [newMessageText, setNewMessageText] = useState('');
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [socketStatus, setSocketStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const fetchMessagesRef = useRef<(() => Promise<void>) | null>(null);
+  
+  // Progress tracker states (enhanced logging)
+  const [projectLogs, setProjectLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logTitle, setLogTitle] = useState('');
+  const [logDetails, setLogDetails] = useState('');
+  const [logType, setLogType] = useState<'Milestone' | 'Task'>('Milestone');
+
+  const projectOwnerId = project ? (typeof project.ownerId === 'string' ? project.ownerId : (project.ownerId as any)?.id || (project.ownerId as any)?._id) : null;
+  const isOwner = user?.id === projectOwnerId;
+  const isAccepted = project?.acceptedUsers?.some((c: any) => {
+    const cid = typeof c === 'string' ? c : c?.id || c?._id;
+    return cid === user?.id;
+  }) || false;
+
+  // Socket communication connection setup
+  useEffect(() => {
+    if (!user || !projectId || !project) return;
+    const isTeammate = isOwner || isAccepted;
+    if (!isTeammate) return;
+
+    setSocketStatus('connecting');
+    const token = localStorage.getItem('token');
+    
+    // Create socket connection safely pointing to root
+    const newSocket = io('/', {
+      auth: { token }
+    });
+
+    setSocket(newSocket);
+
+    newSocket.on('connect', () => {
+      setSocketStatus('connected');
+      newSocket.emit('join_project_room', { projectId });
+    });
+
+    newSocket.on('room_joined', ({ roomId, messages: pastMsgs }) => {
+      setChatRoomId(roomId);
+      setMessages(pastMsgs);
+    });
+
+    newSocket.on('new_message', (msg) => {
+      setMessages((prev) => {
+        if (prev.some(m => m.id === msg.id || m._id === msg._id)) return prev;
+        return [...prev, msg];
+      });
+    });
+
+    newSocket.on('error_message', (err) => {
+      console.error('Socket error received:', err);
+    });
+
+    newSocket.on('disconnect', () => {
+      setSocketStatus('disconnected');
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [projectId, user?.id, isOwner, isAccepted]);
+
+  // Load milestone timeline
+  const fetchProjectLogs = async () => {
+    if (!projectId) return;
+    setLogsLoading(true);
+    try {
+      const data = await logService.getByProject(projectId);
+      setProjectLogs(data);
+    } catch (err) {
+      console.error('Failed to fetch logs:', err);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const fetchMessages = async () => {
+    if (!projectId) return;
+    try {
+      const data = await chatService.getMessages(projectId);
+      setChatRoomId(data.chatRoomId);
+      setMessages(data.messages);
+    } catch (err) {
+      console.error('Failed to fetch messages:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchMessagesRef.current = fetchMessages;
+  });
+
+  useEffect(() => {
+    if (activeTab === 'milestones') {
+      fetchProjectLogs();
+    } else if (activeTab === 'chat') {
+      fetchMessages();
+
+      // Set up a backup poll interval if the websocket is not connected
+      const interval = setInterval(() => {
+        if (socketStatus !== 'connected' && fetchMessagesRef.current) {
+          fetchMessagesRef.current();
+        }
+      }, 4000);
+
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, projectId, socketStatus]);
+
+  // Scroll to bottom on updates
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, activeTab]);
+
+  const handleSendMessage = async () => {
+    const textToSend = newMessageText.trim();
+    if (!textToSend || !projectId) return;
+    setNewMessageText('');
+
+    try {
+      // 1. Post to database via REST (instant, highly reliable)
+      const sentMessage = await chatService.sendMessage(projectId, textToSend);
+
+      // 2. Instantly append to local messages array for 0ms visual latency
+      setMessages((prev) => {
+        if (prev.some(m => m.id === sentMessage.id || m._id === sentMessage._id)) return prev;
+        return [...prev, sentMessage];
+      });
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    }
+  };
+
+  const handleCreateLog = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!logTitle.trim() || !projectId) return;
+
+    try {
+      await logService.create({
+        projectId,
+        contributionType: logType,
+        title: logTitle.trim(),
+        details: logDetails.trim(),
+        points: 0
+      });
+      setLogTitle('');
+      setLogDetails('');
+      fetchProjectLogs();
+    } catch (err) {
+      console.error('Failed to post project milestone:', err);
+    }
+  };
 
   useEffect(() => {
     if (!projectId) return;
@@ -109,11 +274,12 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
         };
         setProject(updatedProject);
 
+        const requesterName = requesterProfiles[requesterId]?.name || 'A teammate';
         // Log contribution for the accepted user
-        // In a real app, the backend should handle this, but we'll do it here for consistency with original logic
         await logService.create({
           projectId,
           contributionType: 'Joined',
+          title: `${requesterName} joined the project`
         });
       }
     } catch (err) {
@@ -132,13 +298,6 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
 
   if (loading) return <div className="animate-pulse space-y-8"><div className="h-64 bg-slate-200 rounded-3xl"></div></div>;
   if (!project) return <div className="text-center py-20">Project not found.</div>;
-
-  const projectOwnerId = typeof project.ownerId === 'string' ? project.ownerId : (project.ownerId as any)?.id || (project.ownerId as any)?._id;
-  const isOwner = user?.id === projectOwnerId;
-  const isAccepted = project.acceptedUsers?.some((c: any) => {
-    const cid = typeof c === 'string' ? c : c?.id || c?._id;
-    return cid === user?.id;
-  });
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -186,34 +345,272 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
             </div>
           </div>
 
-          <div className="prose prose-indigo max-w-none">
-            <h3 className="text-xl font-bold mb-4">Description</h3>
-            <div className="text-slate-600 leading-relaxed">
-              <Markdown>{project.description}</Markdown>
-            </div>
+          {/* Tab Header */}
+          <div className="flex border-b border-slate-100 mb-6 font-medium gap-6 mt-4">
+            <button
+              onClick={() => setActiveTab('details')}
+              className={`pb-3 px-1 border-b-2 text-sm transition-all ${
+                activeTab === 'details' 
+                  ? 'border-indigo-600 text-indigo-600 font-bold' 
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Overview
+            </button>
+            
+            {(isOwner || isAccepted) && (
+              <>
+                <button
+                  onClick={() => setActiveTab('chat')}
+                  className={`pb-3 px-1 border-b-2 text-sm transition-all flex items-center gap-1.5 ${
+                    activeTab === 'chat' 
+                      ? 'border-indigo-600 text-indigo-600 font-bold' 
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Live Workspace Chat
+                  <span className={`w-2 h-2 rounded-full ${socketStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : socketStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 'bg-slate-300'}`}></span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('milestones')}
+                  className={`pb-3 px-1 border-b-2 text-sm transition-all ${
+                    activeTab === 'milestones' 
+                      ? 'border-indigo-600 text-indigo-600 font-bold' 
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Milestones & Progress
+                </button>
+              </>
+            )}
           </div>
 
-          <div className="mt-8 pt-8 border-t border-slate-100">
-            <h3 className="text-xl font-bold mb-4">Tech Stack</h3>
-            <div className="flex flex-wrap gap-2">
-              {project.techStack.map(tech => (
-                <span key={tech} className="bg-slate-50 text-slate-700 px-3 py-1.5 rounded-xl border border-slate-200 text-sm font-medium">
-                  {tech}
-                </span>
-              ))}
-            </div>
-          </div>
+          {activeTab === 'details' && (
+            <>
+              <div className="prose prose-indigo max-w-none">
+                <h3 className="text-xl font-bold mb-4 text-slate-800">Description</h3>
+                <div className="text-slate-600 leading-relaxed">
+                  <Markdown>{project.description}</Markdown>
+                </div>
+              </div>
 
-          <div className="mt-8 pt-8 border-t border-slate-100">
-            <h3 className="text-xl font-bold mb-4">Required Roles</h3>
-            <div className="flex flex-wrap gap-2">
-              {project.requiredRoles.map(role => (
-                <span key={role} className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl border border-indigo-100 text-sm font-medium">
-                  {role}
-                </span>
-              ))}
+              <div className="mt-8 pt-8 border-t border-slate-100">
+                <h3 className="text-xl font-bold mb-4 text-slate-800">Tech Stack</h3>
+                <div className="flex flex-wrap gap-2">
+                  {project.techStack.map(tech => (
+                    <span key={tech} className="bg-slate-50 text-slate-700 px-3 py-1.5 rounded-xl border border-slate-200 text-sm font-medium">
+                      {tech}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-8 pt-8 border-t border-slate-100">
+                <h3 className="text-xl font-bold mb-4 text-slate-800">Required Roles</h3>
+                <div className="flex flex-wrap gap-2">
+                  {project.requiredRoles.map(role => (
+                    <span key={role} className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl border border-indigo-100 text-sm font-medium">
+                      {role}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'chat' && (
+            <div className="space-y-4 pt-2">
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/50 flex flex-col h-[400px] overflow-y-auto space-y-4">
+                {messages.length > 0 ? (
+                  <>
+                    {messages.map((msg, index) => {
+                      const isMe = msg.senderId?._id === user?.id || msg.senderId === user?.id || msg.senderId?.id === user?.id;
+                      const senderName = msg.senderId?.name || (isMe ? user?.name : 'Partner');
+                      const imgUrl = msg.senderId?.profileImage || DEFAULT_AVATAR;
+
+                      return (
+                        <div key={msg._id || index} className={`flex items-start gap-2.5 ${isMe ? 'flex-row-reverse' : ''}`}>
+                          <img 
+                            src={imgUrl} 
+                            alt={senderName} 
+                            className="w-8 h-8 rounded-full border border-slate-200"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className={`flex flex-col max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-xs font-bold text-slate-700">{senderName}</span>
+                              <span className="text-[10px] text-slate-400">
+                                {msg.createdAt ? formatDistanceToNow(new Date(msg.createdAt)) + ' ago' : ''}
+                              </span>
+                            </div>
+                            <div className={`p-3 rounded-2xl text-sm ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white text-slate-800 border border-slate-200/60 rounded-tl-none shadow-sm'}`}>
+                              {msg.text}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div ref={messagesEndRef} />
+                  </>
+                ) : (
+                  <div className="m-auto text-center space-y-2">
+                    <MessageSquare className="w-10 h-10 text-slate-300 mx-auto" />
+                    <p className="text-slate-400 text-sm">No messages yet. Send a note to say hi!</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <input 
+                  type="text"
+                  value={newMessageText}
+                  onChange={(e) => setNewMessageText(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                  placeholder="Type a message..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                />
+                <button
+                  onClick={handleSendMessage}
+                  disabled={!newMessageText.trim()}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 flex items-center justify-center transition-colors disabled:opacity-50"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {activeTab === 'milestones' && (
+            <div className="space-y-6 pt-2">
+              {/* Creator Box: Project Owner can log a Milestone / Task progress */}
+              {(isOwner || isAccepted) && (
+                <form onSubmit={handleCreateLog} className="bg-slate-50 border border-slate-200/65 p-5 rounded-2xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-200/50 pb-2.5">
+                    <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-indigo-600" />
+                      Add Milestone / Track Task
+                    </h4>
+                    <div className="flex gap-1.5 bg-white border border-slate-200 rounded-lg p-0.5">
+                      {['Milestone', 'Task'].map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => setLogType(type as any)}
+                          className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                            logType === type 
+                              ? 'bg-indigo-600 text-white' 
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="sm:col-span-2 space-y-1">
+                      <span className="text-xs font-bold text-slate-600">Progress Title</span>
+                      <input 
+                        required
+                        type="text"
+                        value={logTitle}
+                        onChange={(e) => setLogTitle(e.target.value)}
+                        placeholder="e.g. Completed Database Migrations"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <button 
+                        type="submit"
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Plus className="w-4 h-4" /> Save
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-slate-600">Additional Details (Optional)</span>
+                    <input 
+                      type="text"
+                      value={logDetails}
+                      onChange={(e) => setLogDetails(e.target.value)}
+                      placeholder="e.g. Configured mongoose rules, generated cluster hooks..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </form>
+              )}
+
+              {/* Progress Timeline Feed */}
+              <div className="space-y-4">
+                <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                  <Star className="w-4 h-4 text-emerald-500" />
+                  Project Activity & Milestones Timeline
+                </h4>
+
+                {logsLoading ? (
+                  <div className="space-y-3 h-24 animate-pulse bg-slate-50 rounded-xl"></div>
+                ) : projectLogs.length > 0 ? (
+                  <div className="relative border-l border-indigo-100 ml-4 space-y-6 py-2">
+                    {projectLogs.map((log, index) => {
+                      const logUser = log.userId;
+                      const logName = logUser?.name || 'Teammate';
+                      const logImg = logUser?.profileImage || DEFAULT_AVATAR;
+
+                      return (
+                        <div key={log._id || index} className="relative pl-6">
+                          {/* Dot marker */}
+                          <span className={`absolute -left-[6.5px] top-1.5 w-3 h-3 rounded-full border bg-white ${
+                            log.contributionType === 'Milestone' ? 'border-amber-400 bg-amber-50 shadow-md ring-2 ring-amber-100' :
+                            log.contributionType === 'Task' ? 'border-emerald-400 bg-emerald-50' : 'border-indigo-400 bg-indigo-50'
+                          }`}></span>
+
+                          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                              <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full inline-block ${
+                                log.contributionType === 'Milestone' ? 'bg-amber-100 text-amber-800' :
+                                log.contributionType === 'Task' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-800'
+                              }`}>
+                                {log.contributionType}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                {formatDistanceToNow(new Date(log.createdAt))} ago
+                              </span>
+                            </div>
+
+                            <h5 className="font-bold text-slate-800 text-sm sm:text-base">
+                              {log.title || `${logName} joined the project`}
+                            </h5>
+
+                            {log.details && (
+                              <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap leading-relaxed bg-white border border-slate-100 rounded-lg p-2">
+                                {log.details}
+                              </p>
+                            )}
+
+                            <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-200/50">
+                              <img 
+                                src={logImg} 
+                                className="w-5 h-5 rounded-full border border-slate-200"
+                                referrerPolicy="no-referrer"
+                              />
+                              <span className="text-xs font-semibold text-slate-600">{logName}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                    No milestone or contribution logs tracked yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Requests Section for Owner */}
@@ -238,7 +635,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                               className="flex items-center gap-2 hover:opacity-80 transition-opacity"
                             >
                               <img 
-                                src={profile?.profileImage || `https://picsum.photos/seed/${reqUserId}/32/32`} 
+                                src={profile?.profileImage || DEFAULT_AVATAR} 
                                 className="w-8 h-8 rounded-full border border-slate-200"
                                 referrerPolicy="no-referrer"
                               />
@@ -320,9 +717,9 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
             className="group block w-full text-center"
           >
             <img 
-              src={owner?.profileImage || `https://picsum.photos/seed/${owner?.id}/80/80`} 
+              src={owner?.profileImage || DEFAULT_AVATAR} 
               alt={owner?.name} 
-              className="w-20 h-20 rounded-full mx-auto mb-4 border-2 border-indigo-100 group-hover:border-indigo-600 transition-all"
+              className="w-20 h-20 rounded-full mx-auto mb-4 border-2 border-indigo-100 group-hover:border-indigo-600 transition-all bg-white"
               referrerPolicy="no-referrer"
             />
             <h4 className="text-lg font-bold text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors">{owner?.name || 'Loading...'}</h4>
@@ -357,17 +754,11 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                       onClick={() => navigate('profile', uid)}
                       className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left group"
                     >
-                      {profileImage ? (
-                        <img 
-                          src={profileImage} 
-                          className="w-10 h-10 rounded-full border border-slate-200"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold">
-                          {name[0]}
-                        </div>
-                      )}
+                      <img 
+                        src={profileImage || DEFAULT_AVATAR} 
+                        className="w-10 h-10 rounded-full border border-slate-200 bg-white"
+                        referrerPolicy="no-referrer"
+                      />
                       <div>
                         <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{name}</p>
                         <p className="text-xs text-slate-500">Collaborator</p>

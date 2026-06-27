@@ -27,6 +27,9 @@ export interface Project {
   userRoles?: Record<string, string>; // userId -> roleName
   applicants: any[];
   acceptedUsers: any[];
+  locationName?: string;
+  locationCoords?: { lat: number; lng: number };
+  h3Index?: string;
   createdAt: string;
 }
 
@@ -42,16 +45,20 @@ export interface CollaborationRequest {
 export interface Endorsement {
   id: string;
   skill: string;
-  endorsedBy: string;
+  endorsedBy: any; // Populated user object or ID string
   endorsedUser: string;
   createdAt: string;
 }
 
 export interface ContributionLog {
   id: string;
-  userId: string;
+  _id?: string;
+  userId: any;
   projectId: string;
   date: string; // YYYY-MM-DD
-  contributionType: 'Joined' | 'Completed';
+  contributionType: 'Joined' | 'Completed' | 'Milestone' | 'Task';
+  title?: string;
+  details?: string;
+  points?: number;
   createdAt: string;
 }

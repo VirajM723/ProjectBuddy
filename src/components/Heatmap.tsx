@@ -33,8 +33,10 @@ export function Heatmap({ logs }: HeatmapProps) {
     // Aggregate logs by date
     const logCounts = new Map<string, number>();
     logs.forEach(log => {
+      const logDateStr = log.date || (log.createdAt ? format(new Date(log.createdAt), 'yyyy-MM-dd') : null);
+      if (!logDateStr) return;
       const count = log.contributionType === 'Completed' ? 3 : 1;
-      logCounts.set(log.date, (logCounts.get(log.date) || 0) + count);
+      logCounts.set(logDateStr, (logCounts.get(logDateStr) || 0) + count);
     });
 
     const colorScale = d3.scaleThreshold<number, string>()

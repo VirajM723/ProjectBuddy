@@ -2,11 +2,12 @@ import express from 'express';
 import { CollaborationRequest } from '../models/CollaborationRequest.js';
 import { Project } from '../models/Project.js';
 import { authMiddleware, AuthRequest } from '../middleware/auth.js';
+import { applicationLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
 // Create request
-router.post('/', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/', authMiddleware, applicationLimiter, async (req: AuthRequest, res) => {
   try {
     const { projectId, message } = req.body;
     const request = new CollaborationRequest({

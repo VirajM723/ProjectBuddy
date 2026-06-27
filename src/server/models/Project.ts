@@ -13,6 +13,12 @@ const projectSchema = new mongoose.Schema({
   userRoles: { type: Map, of: String, default: {} },
   applicants: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   acceptedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  locationName: { type: String, default: '' },
+  locationCoords: {
+    lat: { type: Number },
+    lng: { type: Number }
+  },
+  h3Index: { type: String, default: '' },
   createdAt: { type: Date, default: Date.now },
 }, { 
   toJSON: {

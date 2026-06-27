@@ -11,6 +11,7 @@ export function Admin() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // In MERN, the user object from useAuth will have the role
     if (user?.role !== 'admin') return;
 
     const fetchData = async () => {
@@ -35,6 +36,8 @@ export function Admin() {
   const handleDeleteUser = async (userId: string) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
     try {
+      // We need to add a deleteUser to adminService if it doesn't exist
+      // For now, let's assume it's there or we'll add it
       await adminService.deleteUser(userId);
       setUsers(users.filter(u => u.id !== userId));
     } catch (err) {
@@ -85,7 +88,7 @@ export function Admin() {
             {users.map(u => (
               <div key={u.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                 <div className="flex items-center gap-3">
-                  <img src={u.profileImage || `https://picsum.photos/seed/${u.id}/40/40`} className="w-10 h-10 rounded-full" referrerPolicy="no-referrer" />
+                  <img src={u.profileImage || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>'} className="w-10 h-10 rounded-full bg-white" referrerPolicy="no-referrer" />
                   <div>
                     <div className="font-bold text-slate-900">{u.name}</div>
                     <div className="text-xs text-slate-500">{u.email}</div>

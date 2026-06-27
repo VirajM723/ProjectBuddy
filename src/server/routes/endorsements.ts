@@ -14,7 +14,8 @@ router.post('/', authMiddleware, async (req: AuthRequest, res) => {
       endorsedUser,
     });
     await endorsement.save();
-    res.status(201).json(endorsement);
+    const populatedEndorsement = await Endorsement.findById(endorsement._id).populate('endorsedBy', 'name profileImage');
+    res.status(201).json(populatedEndorsement);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }

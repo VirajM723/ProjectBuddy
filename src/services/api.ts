@@ -14,13 +14,31 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 429) {
+      const serverMsg = error.response.data?.message;
+      const userWarning = serverMsg || "You have made too many requests. Please wait a moment and try again.";
+      error.message = userWarning;
+      if (error.response.data) {
+        error.response.data.message = userWarning;
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const authService = {
   login: (credentials: any) => api.post('/auth/login', credentials).then(res => res.data),
   register: (userData: any) => api.post('/auth/register', userData).then(res => res.data),
 };
 
 export const projectService = {
-  getAll: () => api.get('/projects').then(res => res.data),
+  getAll: (coords?: { lat: number; lng: number }) => {
+    const params = coords ? `?lat=${coords.lat}&lng=${coords.lng}` : '';
+    return api.get(`/projects${params}`).then(res => res.data);
+  },
   getById: (id: string) => api.get(`/projects/${id}`).then(res => res.data),
   create: (data: any) => api.post('/projects', data).then(res => res.data),
   update: (id: string, data: any) => api.put(`/projects/${id}`, data).then(res => res.data),
@@ -46,6 +64,12 @@ export const endorsementService = {
 export const logService = {
   create: (data: any) => api.post('/logs', data).then(res => res.data),
   getByUser: (userId: string) => api.get(`/logs/user/${userId}`).then(res => res.data),
+  getByProject: (projectId: string) => api.get(`/logs/project/${projectId}`).then(res => res.data),
+};
+
+export const chatService = {
+  getMessages: (projectId: string) => api.get(`/projects/${projectId}/messages`).then(res => res.data),
+  sendMessage: (projectId: string, text: string) => api.post(`/projects/${projectId}/messages`, { text }).then(res => res.data),
 };
 
 export const adminService = {

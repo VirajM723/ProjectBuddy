@@ -1,5 +1,5 @@
 import { Project } from '../types';
-import { Calendar, Users, Tag, ArrowRight, Briefcase } from 'lucide-react';
+import { Calendar, Users, Tag, ArrowRight, Briefcase, MapPin } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 interface ProjectCardProps {
@@ -22,13 +22,21 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
             {project.summary}
           </p>
         </div>
-        <span className={`px-2 py-1 rounded-md text-xs font-semibold ${
-          project.status === 'Open' ? 'bg-emerald-50 text-emerald-700' : 
-          project.status === 'Ongoing' ? 'bg-blue-50 text-blue-700' : 
-          'bg-slate-100 text-slate-600'
-        }`}>
-          {project.status}
-        </span>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className={`px-2 py-1 rounded-md text-xs font-semibold ${
+            project.status === 'Open' ? 'bg-emerald-50 text-emerald-700' : 
+            project.status === 'Ongoing' ? 'bg-blue-50 text-blue-700' : 
+            'bg-slate-100 text-slate-600'
+          }`}>
+            {project.status}
+          </span>
+          {project.locationName && (
+            <span className="flex items-center gap-0.5 text-xs text-indigo-600 font-medium bg-indigo-50 px-1.5 py-0.5 rounded-md mt-1">
+              <MapPin className="w-3 h-3 shrink-0" />
+              {project.locationName}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="space-y-3 mb-6">

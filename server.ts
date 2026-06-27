@@ -5,6 +5,9 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import { setupSocket } from './src/server/socket.js';
 
 // Routes
 import authRoutes from './src/server/routes/auth.js';
@@ -23,6 +26,20 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  
+  // Create HTTP server and initialize socket.io
+  const httpServer = createServer(app);
+  const io = new Server(httpServer, {
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST']
+    }
+  });
+
+  app.set('io', io);
+
+  // Setup WebSocket handlers
+  setupSocket(io);
 
   // MongoDB Connection
   const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/project-buddy';
@@ -57,7 +74,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

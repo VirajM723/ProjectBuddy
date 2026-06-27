@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../App';
-import { Rocket, Tag, Users, Clock, Briefcase, AlertCircle, CheckCircle } from 'lucide-react';
+import { Rocket, Tag, Users, Clock, Briefcase, AlertCircle, CheckCircle, Compass } from 'lucide-react';
 import { isSameDay } from 'date-fns';
 import { projectService, logService } from '../services/api';
 
@@ -23,11 +23,18 @@ export function CreateProject({ navigate }: CreateProjectProps) {
   const [error, setError] = useState<string | null>(null);
   const [rateLimitReached, setRateLimitReached] = useState(false);
 
+  // Opt-in Location States
+  const [includeLocation, setIncludeLocation] = useState(false);
+  const [locationName, setLocationName] = useState('');
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [locLoading, setLocLoading] = useState(false);
+
   useEffect(() => {
     const checkRateLimit = async () => {
       if (!user) return;
       try {
         // Fetch all projects and filter for user's projects created today
+        // In a real app, this should be a backend check
         const projects = await projectService.getAll();
         const myProjects = projects.filter((p: any) => p.ownerId === user.id || p.ownerId?.id === user.id || p.ownerId?._id === user.id);
         const todayProjects = myProjects.filter((p: any) => isSameDay(new Date(p.createdAt), new Date()));
@@ -59,6 +66,8 @@ export function CreateProject({ navigate }: CreateProjectProps) {
         commitmentLevel: formData.commitmentLevel,
         projectType: formData.projectType,
         status: 'Open' as const,
+        locationName: includeLocation ? locationName : undefined,
+        locationCoords: includeLocation && locationCoords ? locationCoords : undefined,
       };
 
       const newProject = await projectService.create(projectData);
@@ -200,6 +209,92 @@ export function CreateProject({ navigate }: CreateProjectProps) {
                 <option>Non-Profit</option>
               </select>
             </div>
+          </div>
+
+          {/* Opt-in Location */}
+          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4 shadow-inner">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <input 
+                type="checkbox"
+                checked={includeLocation}
+                onChange={(e) => {
+                  setIncludeLocation(e.target.checked);
+                  if (e.target.checked) {
+                    setLocLoading(true);
+                    navigator.geolocation.getCurrentPosition(
+                      async (position) => {
+                        const coarseLat = Math.round(position.coords.latitude * 10) / 10;
+                        const coarseLng = Math.round(position.coords.longitude * 10) / 10;
+                        setLocationCoords({
+                          lat: coarseLat,
+                          lng: coarseLng
+                        });
+                        try {
+                          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coarseLat}&lon=${coarseLng}&zoom=10`, {
+                            headers: {
+                              'Accept-Language': 'en',
+                              'User-Agent': 'Project-Buddy-Developer'
+                            }
+                          });
+                          const data = await res.json();
+                          const city = data.address?.city || data.address?.town || data.address?.village || data.address?.municipality || data.address?.county || '';
+                          if (city) {
+                            setLocationName(city);
+                          }
+                        } catch (gerr) {
+                          console.error('Nominatim reverse geocode failed:', gerr);
+                        }
+                        setLocLoading(false);
+                      },
+                      (err) => {
+                        console.error('GPS auto-fill failed:', err);
+                        setLocLoading(false);
+                      },
+                      { enableHighAccuracy: false, timeout: 8000 }
+                    );
+                  } else {
+                    setLocationName('');
+                    setLocationCoords(null);
+                  }
+                }}
+                className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded"
+              />
+              <span className="text-sm font-bold text-slate-800">Attach general location to this project (Opt-in)</span>
+            </label>
+            
+            {includeLocation && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 animate-fade-in">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-600">Location Name / Area</label>
+                  <input 
+                    type="text"
+                    value={locationName}
+                    onChange={(e) => setLocationName(e.target.value)}
+                    placeholder="e.g. Mumbai, Tiruchirappalli, Delhi"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                  />
+                </div>
+                <div className="space-y-2 flex flex-col justify-end">
+                  <span className="text-xs font-bold text-slate-600">GPS Location Cell Target</span>
+                  <div className="text-sm text-slate-500 py-3 px-4 bg-white border border-slate-200 rounded-xl flex items-center gap-2 min-h-[46px]">
+                    {locLoading ? (
+                      <span className="text-indigo-600 animate-pulse font-medium flex items-center gap-1.5">
+                        <Compass className="w-4 h-4 animate-spin" /> Detecting location...
+                      </span>
+                    ) : locationCoords ? (
+                      <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                        Proximity Lock: {locationCoords.lat.toFixed(4)}, {locationCoords.lng.toFixed(4)}
+                      </span>
+                    ) : (
+                      <span className="text-amber-600 font-medium text-xs">
+                        GPS disabled/blocked. Filterable using manual city name only.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {error && <p className="text-red-500 text-sm font-medium">{error}</p>}

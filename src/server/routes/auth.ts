@@ -2,12 +2,13 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
+import { authLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
 // Register
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   try {
     const { name, email, password } = req.body;
     let user = await User.findOne({ email });
@@ -26,7 +27,7 @@ router.post('/register', async (req, res) => {
 });
 
 // Login
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Project } from '../types';
 import { ProjectCard } from '../components/ProjectCard';
-import { Search, Filter, Rocket, Clock } from 'lucide-react';
+import { Search, Filter, Rocket, Clock, MapPin, Compass, AlertCircle } from 'lucide-react';
 import { projectService } from '../services/api';
 
 interface HomeProps {
@@ -13,11 +13,56 @@ export function Home({ navigate }: HomeProps) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'All' | 'Open' | 'Ongoing' | 'Completed'>('All');
+  
+  // Geolocation and H3 filtering states
+  const [geoFilter, setGeoFilter] = useState(false);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
+
+  const toggleGeoFilter = () => {
+    if (!geoFilter) {
+      setGeoLoading(true);
+      setGeoError(null);
+      
+      if (!navigator.geolocation) {
+        setGeoError('Geolocation is not supported by your browser.');
+        setGeoLoading(false);
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const userCoords = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          setCoords(userCoords);
+          setGeoFilter(true);
+          setGeoLoading(false);
+        },
+        (error) => {
+          console.error('Geolocation error:', error);
+          let errMsg = 'Location access denied or unavailable.';
+          if (error.code === error.PERMISSION_DENIED) {
+            errMsg = 'Allow location permissions to filter projects near you.';
+          }
+          setGeoError(errMsg);
+          setGeoLoading(false);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } else {
+      setGeoFilter(false);
+      setCoords(null);
+    }
+  };
 
   useEffect(() => {
     const fetchProjects = async () => {
+      setLoading(true);
       try {
-        const data = await projectService.getAll();
+        const data = await projectService.getAll(coords || undefined);
         setProjects(data);
       } catch (error) {
         console.error('Failed to fetch projects', error);
@@ -27,15 +72,15 @@ export function Home({ navigate }: HomeProps) {
     };
 
     fetchProjects();
-  }, []);
+  }, [coords]);
 
   const filteredProjects = projects.filter(p => {
-    const matchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const marchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           p.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           p.techStack.some(t => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
                           p.requiredRoles.some(r => r.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesStatus = filterStatus === 'All' || p.status === filterStatus;
-    return matchesSearch && matchesStatus;
+    return marchesSearch && matchesStatus;
   });
 
   return (
@@ -64,32 +109,73 @@ export function Home({ navigate }: HomeProps) {
       </section>
 
       {/* Search and Filter */}
-      <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-        <div className="relative w-full sm:max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-          <input 
-            type="text"
-            placeholder="Search projects, tech, or roles..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-          />
-        </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
-          <Filter className="w-5 h-5 text-slate-400 mr-2 shrink-0" />
-          {['All', 'Open', 'Ongoing', 'Completed'].map((status) => (
+      <div className="space-y-4">
+        {geoError && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-start gap-3 text-sm animate-fade-in shadow-sm">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <span className="font-semibold">Location Access Issue: </span>
+              {geoError}
+            </div>
+            <button 
+              onClick={() => setGeoError(null)} 
+              className="text-amber-500 hover:text-amber-700 text-xs font-bold leading-none"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-col lg:flex-row gap-4 items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="relative w-full lg:max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+            <input 
+              type="text"
+              placeholder="Search projects, tech, or roles..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+            />
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+            {/* Geo Filter Button */}
             <button
-              key={status}
-              onClick={() => setFilterStatus(status as any)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
-                filterStatus === status 
-                  ? 'bg-indigo-600 text-white shadow-md' 
-                  : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+              onClick={toggleGeoFilter}
+              disabled={geoLoading}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                geoFilter 
+                  ? 'bg-emerald-50 border-emerald-250 text-emerald-700 font-semibold shadow-sm' 
+                  : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100'
               }`}
             >
-              {status}
+              {geoLoading ? (
+                <Compass className="w-4 h-4 text-emerald-500 animate-spin" />
+              ) : (
+                <MapPin className={`w-4 h-4 ${geoFilter ? 'text-emerald-600' : 'text-slate-400'}`} />
+              )}
+              {geoLoading ? 'Locating...' : geoFilter ? 'Proximity: Near Me' : 'Filter Near Me'}
             </button>
-          ))}
+
+            <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
+
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+              <Filter className="w-5 h-5 text-slate-400 mr-1 shrink-0" />
+              {['All', 'Open', 'Ongoing', 'Completed'].map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setFilterStatus(status as any)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+                    filterStatus === status 
+                      ? 'bg-indigo-600 text-white shadow-md' 
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 

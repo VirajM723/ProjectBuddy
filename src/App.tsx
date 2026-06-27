@@ -18,6 +18,7 @@ interface AuthContextType {
   signIn: (credentials: any) => Promise<void>;
   register: (userData: any) => Promise<void>;
   logout: () => Promise<void>;
+  updateProfileState: (updatedProfile: UserProfile) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -101,6 +102,15 @@ export default function App() {
     setCurrentPage('home');
   };
 
+  const updateProfileState = (updatedProfile: UserProfile) => {
+    setProfile(updatedProfile);
+    if (user && user.id === updatedProfile.id) {
+      const u = { ...user, profileImage: updatedProfile.profileImage, name: updatedProfile.name };
+      setUser(u);
+      localStorage.setItem('user', JSON.stringify(u));
+    }
+  };
+
   const navigate = (page: 'home' | 'profile' | 'create' | 'admin' | 'project', id?: string) => {
     if (page === 'profile') {
       const targetId = id || user?.id;
@@ -127,14 +137,14 @@ export default function App() {
 
   if (!user) {
     return (
-      <AuthContext.Provider value={{ user, profile, loading, signingIn, signIn, register, logout }}>
+      <AuthContext.Provider value={{ user, profile, loading, signingIn, signIn, register, logout, updateProfileState }}>
         <Login />
       </AuthContext.Provider>
     );
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signingIn, signIn, register, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, signingIn, signIn, register, logout, updateProfileState }}>
       <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
         <Navbar navigate={navigate} currentPage={currentPage} />
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

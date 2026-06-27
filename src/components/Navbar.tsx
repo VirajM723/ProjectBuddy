@@ -63,7 +63,7 @@ export function Navbar({ navigate, currentPage }: NavbarProps) {
                   Logout
                 </button>
                 <img 
-                  src={profile?.profileImage || `https://picsum.photos/seed/${user.id}/40/40`} 
+                  src={profile?.profileImage || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>'} 
                   alt="Profile" 
                   className="w-8 h-8 rounded-full border border-slate-200"
                   referrerPolicy="no-referrer"
