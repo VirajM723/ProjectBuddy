@@ -7,7 +7,7 @@ export const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: Request) => req.ip || 'unknown',
+  validate: { trustProxy: false },
   message: { message: "You have made too many authentication attempts. Please wait 15 minutes." }
 });
 
@@ -18,6 +18,7 @@ export const projectLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req: Request) => (req as any).userId || req.ip || 'unknown',
+  validate: { trustProxy: false },
   message: { message: "You have exceeded the daily limit of 5 project creations. Please try again tomorrow." }
 });
 
@@ -28,5 +29,6 @@ export const applicationLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req: Request) => (req as any).userId || req.ip || 'unknown',
+  validate: { trustProxy: false },
   message: { message: "You have exceeded the limit of 10 collaboration requests per hour. Please wait an hour." }
 });

@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
@@ -20,12 +19,12 @@ import adminRoutes from './src/server/routes/admin.js';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  
+  // Trust proxy for rate limiter to identify client IP addresses correctly on Render
+  app.set('trust proxy', 1);
   
   // Create HTTP server and initialize socket.io
   const httpServer = createServer(app);
