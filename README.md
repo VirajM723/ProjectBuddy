@@ -1,3 +1,25 @@
+# Project Buddy
+
+A full-stack developer collaboration platform for discovering projects,
+finding collaborators, communicating in real time, and tracking project
+progress.
+
+**Live Demo:** https://projectbuddy-dzn3.onrender.com
+
+**GitHub:** https://github.com/VirajM723/ProjectBuddy
+
+------------------------------------------------------------------------
+
+## Overview
+
+Project Buddy is a web application designed to help developers connect
+and collaborate on software projects. Users can create projects, find
+collaborators, communicate through project-specific chat, manage
+milestones, and track contributions from a single platform.
+
+The application also includes location-based project discovery, activity
+tracking, and backend protections against spam and abuse.
+
 ## Features
 
 ### Authentication
