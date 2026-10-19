@@ -4,7 +4,7 @@ import { useAuth } from '../App';
 import { Calendar, Users, Tag, Briefcase, Clock, Send, CheckCircle, XCircle, Github, Linkedin, MessageSquare, Plus, Activity, Star } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import Markdown from 'react-markdown';
-import { projectService, userService, collaborationService, logService, chatService } from '../services/api';
+import { projectService, userService, collaborationService, logService, chatService, getId, getErrorMessage } from '../services/api';
 import { io, Socket } from 'socket.io-client';
 
 const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>';
@@ -23,7 +23,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [existingRequest, setExistingRequest] = useState<CollaborationRequest | null>(null);
   const [requests, setRequests] = useState<CollaborationRequest[]>([]);
-  const [requesterProfiles, setRequesterProfiles] = useState<Record<string, UserProfile>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Real-time Chat and Milestones states
   const [activeTab, setActiveTab] = useState<'details' | 'chat' | 'milestones'>('details');
@@ -41,13 +41,17 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
   const [logTitle, setLogTitle] = useState('');
   const [logDetails, setLogDetails] = useState('');
   const [logType, setLogType] = useState<'Milestone' | 'Task'>('Milestone');
+  const [logError, setLogError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
 
-  const projectOwnerId = project ? (typeof project.ownerId === 'string' ? project.ownerId : (project.ownerId as any)?.id || (project.ownerId as any)?._id) : null;
-  const isOwner = user?.id === projectOwnerId;
-  const isAccepted = project?.acceptedUsers?.some((c: any) => {
-    const cid = typeof c === 'string' ? c : c?.id || c?._id;
-    return cid === user?.id;
-  }) || false;
+  const projectOwnerId = project ? getId(project.ownerId) : null;
+  const isOwner = !!user?.id && user.id === projectOwnerId;
+  const isAccepted = project?.acceptedUsers?.some((c: any) => getId(c) === user?.id) || false;
+
+  // Appends a message unless it is already shown (it can arrive via both REST and the socket)
+  const appendMessage = (msg: any) => {
+    setMessages((prev) => (prev.some(m => getId(m) === getId(msg)) ? prev : [...prev, msg]));
+  };
 
   // Socket communication connection setup
   useEffect(() => {
@@ -75,12 +79,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
       setMessages(pastMsgs);
     });
 
-    newSocket.on('new_message', (msg) => {
-      setMessages((prev) => {
-        if (prev.some(m => m.id === msg.id || m._id === msg._id)) return prev;
-        return [...prev, msg];
-      });
-    });
+    newSocket.on('new_message', appendMessage);
 
     newSocket.on('error_message', (err) => {
       console.error('Socket error received:', err);
@@ -152,24 +151,24 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
     const textToSend = newMessageText.trim();
     if (!textToSend || !projectId) return;
     setNewMessageText('');
+    setChatError(null);
 
     try {
-      // 1. Post to database via REST (instant, highly reliable)
+      // Post via REST (reliable); the server also broadcasts it to teammates over the socket
       const sentMessage = await chatService.sendMessage(projectId, textToSend);
-
-      // 2. Instantly append to local messages array for 0ms visual latency
-      setMessages((prev) => {
-        if (prev.some(m => m.id === sentMessage.id || m._id === sentMessage._id)) return prev;
-        return [...prev, sentMessage];
-      });
+      appendMessage(sentMessage);
     } catch (err) {
       console.error('Failed to send message:', err);
+      // Restore the draft so the user doesn't lose it
+      setNewMessageText(textToSend);
+      setChatError(getErrorMessage(err, 'Message failed to send.'));
     }
   };
 
   const handleCreateLog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!logTitle.trim() || !projectId) return;
+    setLogError(null);
 
     try {
       await logService.create({
@@ -177,13 +176,13 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
         contributionType: logType,
         title: logTitle.trim(),
         details: logDetails.trim(),
-        points: 0
       });
       setLogTitle('');
       setLogDetails('');
       fetchProjectLogs();
     } catch (err) {
       console.error('Failed to post project milestone:', err);
+      setLogError(getErrorMessage(err, 'Failed to save progress.'));
     }
   };
 
@@ -196,37 +195,18 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
         const projectData = await projectService.getById(projectId);
         setProject(projectData);
 
-        // Fetch owner
-        const ownerId = typeof projectData.ownerId === 'string' ? projectData.ownerId : projectData.ownerId?.id || projectData.ownerId?._id;
-        if (ownerId) {
-          const ownerData = await userService.getProfile(ownerId);
-          setOwner(ownerData);
-        }
+        const ownerId = getId(projectData.ownerId);
+        const viewerIsOwner = !!user && ownerId === user.id;
 
-        // If owner, fetch all requests
-        if (user && (projectData.ownerId === user.id || projectData.ownerId?.id === user.id || projectData.ownerId?._id === user.id)) {
-          const allReqs = await collaborationService.getByProject(projectId);
-          setRequests(allReqs);
-
-          // Fetch profiles for requesters
-          const profiles: Record<string, UserProfile> = {};
-          for (const req of allReqs) {
-            const reqUserId = typeof req.userId === 'string' ? req.userId : req.userId?.id || req.userId?._id;
-            if (reqUserId && !profiles[reqUserId]) {
-              const uData = await userService.getProfile(reqUserId);
-              profiles[reqUserId] = uData;
-            }
-          }
-          setRequesterProfiles(profiles);
-        }
-
-        // Check for existing request from current user
-        if (user) {
-          const myReq = await collaborationService.getMyRequest(projectId);
-          if (myReq) {
-            setExistingRequest(myReq);
-          }
-        }
+        // Owner profile, the owner's request inbox (requesters come pre-populated), and our own request
+        const [ownerData, allReqs, myReq] = await Promise.all([
+          ownerId ? userService.getProfile(ownerId) : Promise.resolve(null),
+          viewerIsOwner ? collaborationService.getByProject(projectId) : Promise.resolve([]),
+          user && !viewerIsOwner ? collaborationService.getMyRequest(projectId) : Promise.resolve(null),
+        ]);
+        setOwner(ownerData);
+        setRequests(allReqs);
+        setExistingRequest(myReq || null);
       } catch (err) {
         console.error("Error fetching project details:", err);
       } finally {
@@ -240,6 +220,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
   const handleApply = async () => {
     if (!user || !project) return;
     setIsSubmitting(true);
+    setActionError(null);
     try {
       const newRequest = await collaborationService.create({
         projectId,
@@ -255,44 +236,39 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
       });
     } catch (err) {
       console.error("Application error:", err);
+      setActionError(getErrorMessage(err, 'Failed to send your request.'));
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleRequestAction = async (requestId: string, requesterId: string, action: 'Accepted' | 'Rejected') => {
+  const handleRequestAction = async (request: CollaborationRequest, action: 'Accepted' | 'Rejected') => {
+    setActionError(null);
     try {
-      await collaborationService.updateStatus(requestId, action);
-      
-      // Update local state
-      setRequests(requests.map(r => r.id === requestId ? { ...r, status: action } : r));
+      // The server adds the member and credits their "Joined" contribution
+      await collaborationService.updateStatus(request.id, action);
+      setRequests(prev => prev.map(r => r.id === request.id ? { ...r, status: action } : r));
       
       if (action === 'Accepted') {
-        const updatedProject = {
-          ...project!,
-          acceptedUsers: [...(project!.acceptedUsers || []), requesterProfiles[requesterId] || requesterId]
-        };
-        setProject(updatedProject);
-
-        const requesterName = requesterProfiles[requesterId]?.name || 'A teammate';
-        // Log contribution for the accepted user
-        await logService.create({
-          projectId,
-          contributionType: 'Joined',
-          title: `${requesterName} joined the project`
-        });
+        setProject(prev => prev && ({
+          ...prev,
+          acceptedUsers: [...(prev.acceptedUsers || []), request.userId]
+        }));
       }
     } catch (err) {
       console.error("Request action error:", err);
+      setActionError(getErrorMessage(err, 'Failed to update the request.'));
     }
   };
 
   const handleStatusChange = async (newStatus: Project['status']) => {
+    setActionError(null);
     try {
       await projectService.update(projectId, { status: newStatus });
-      setProject({ ...project!, status: newStatus });
+      setProject(prev => prev && { ...prev, status: newStatus });
     } catch (err) {
       console.error("Status change error:", err);
+      setActionError(getErrorMessage(err, 'Failed to change status.'));
     }
   };
 
@@ -304,8 +280,11 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
       {/* Main Content */}
       <div className="lg:col-span-2 space-y-8">
         <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-start mb-6">
-            <h1 className="text-3xl font-extrabold text-slate-900">{project.title}</h1>
+          {actionError && (
+            <p className="mb-4 text-sm font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2">{actionError}</p>
+          )}
+          <div className="flex justify-between items-start gap-4 mb-6">
+            <h1 className="text-3xl font-extrabold text-slate-900 break-words min-w-0">{project.title}</h1>
             <div className="flex items-center gap-4">
               {isOwner ? (
                 <div className="flex items-center gap-2">
@@ -424,12 +403,12 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                 {messages.length > 0 ? (
                   <>
                     {messages.map((msg, index) => {
-                      const isMe = msg.senderId?._id === user?.id || msg.senderId === user?.id || msg.senderId?.id === user?.id;
+                      const isMe = getId(msg.senderId) === user?.id;
                       const senderName = msg.senderId?.name || (isMe ? user?.name : 'Partner');
                       const imgUrl = msg.senderId?.profileImage || DEFAULT_AVATAR;
 
                       return (
-                        <div key={msg._id || index} className={`flex items-start gap-2.5 ${isMe ? 'flex-row-reverse' : ''}`}>
+                        <div key={getId(msg) || index} className={`flex items-start gap-2.5 ${isMe ? 'flex-row-reverse' : ''}`}>
                           <img 
                             src={imgUrl} 
                             alt={senderName} 
@@ -443,7 +422,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                                 {msg.createdAt ? formatDistanceToNow(new Date(msg.createdAt)) + ' ago' : ''}
                               </span>
                             </div>
-                            <div className={`p-3 rounded-2xl text-sm ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white text-slate-800 border border-slate-200/60 rounded-tl-none shadow-sm'}`}>
+                            <div className={`p-3 rounded-2xl text-sm whitespace-pre-wrap break-words max-w-full ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white text-slate-800 border border-slate-200/60 rounded-tl-none shadow-sm'}`}>
                               {msg.text}
                             </div>
                           </div>
@@ -465,7 +444,8 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                   type="text"
                   value={newMessageText}
                   onChange={(e) => setNewMessageText(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleSendMessage()}
+                  maxLength={2000}
                   placeholder="Type a message..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                 />
@@ -477,6 +457,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                   <Send className="w-4 h-4" />
                 </button>
               </div>
+              {chatError && <p className="text-xs font-medium text-red-600">{chatError}</p>}
             </div>
           )}
 
@@ -536,10 +517,12 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                       type="text"
                       value={logDetails}
                       onChange={(e) => setLogDetails(e.target.value)}
+                      maxLength={2000}
                       placeholder="e.g. Configured mongoose rules, generated cluster hooks..."
                       className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
+                  {logError && <p className="text-xs font-medium text-red-600">{logError}</p>}
                 </form>
               )}
 
@@ -560,7 +543,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                       const logImg = logUser?.profileImage || DEFAULT_AVATAR;
 
                       return (
-                        <div key={log._id || index} className="relative pl-6">
+                        <div key={getId(log) || index} className="relative pl-6">
                           {/* Dot marker */}
                           <span className={`absolute -left-[6.5px] top-1.5 w-3 h-3 rounded-full border bg-white ${
                             log.contributionType === 'Milestone' ? 'border-amber-400 bg-amber-50 shadow-md ring-2 ring-amber-100' :
@@ -627,8 +610,8 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         {(() => {
-                          const reqUserId = typeof req.userId === 'string' ? req.userId : req.userId?.id || req.userId?._id;
-                          const profile = typeof req.userId === 'string' ? requesterProfiles[reqUserId] : req.userId;
+                          const reqUserId = getId(req.userId);
+                          const profile = typeof req.userId === 'string' ? null : req.userId;
                           return (
                             <button 
                               onClick={() => navigate('profile', reqUserId)}
@@ -640,7 +623,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                                 referrerPolicy="no-referrer"
                               />
                               <span className="font-bold text-slate-900 hover:text-indigo-600 transition-colors">
-                                {profile?.name || 'Loading...'}
+                                {profile?.name || 'Deleted user'}
                               </span>
                             </button>
                           );
@@ -653,7 +636,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                         </span>
                       </div>
                       {(() => {
-                        const profile = typeof req.userId === 'string' ? requesterProfiles[req.userId] : req.userId;
+                        const profile = typeof req.userId === 'string' ? null : req.userId;
                         if (!profile) return null;
                         return (
                           <div className="space-y-1">
@@ -676,20 +659,14 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                     {req.status === 'Pending' && (
                       <div className="flex gap-2 shrink-0">
                         <button 
-                          onClick={() => {
-                            const reqUserId = typeof req.userId === 'string' ? req.userId : req.userId?.id || req.userId?._id;
-                            handleRequestAction(req.id, reqUserId, 'Accepted');
-                          }}
+                          onClick={() => handleRequestAction(req, 'Accepted')}
                           className="flex items-center gap-1 bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 transition-colors"
                         >
                           <CheckCircle className="w-4 h-4" />
                           Accept
                         </button>
                         <button 
-                          onClick={() => {
-                            const reqUserId = typeof req.userId === 'string' ? req.userId : req.userId?.id || req.userId?._id;
-                            handleRequestAction(req.id, reqUserId, 'Rejected');
-                          }}
+                          onClick={() => handleRequestAction(req, 'Rejected')}
                           className="flex items-center gap-1 bg-white text-red-600 border border-red-200 px-3 py-2 rounded-xl text-sm font-bold hover:bg-red-50 transition-colors"
                         >
                           <XCircle className="w-4 h-4" />
@@ -724,17 +701,17 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
             />
             <h4 className="text-lg font-bold text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors">{owner?.name || 'Loading...'}</h4>
           </button>
-          {project.userRoles?.[project.ownerId] && (
+          {projectOwnerId && project.userRoles?.[projectOwnerId] && (
             <div className="mb-2">
               <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold uppercase">
-                {project.userRoles[project.ownerId]}
+                {project.userRoles[projectOwnerId]}
               </span>
             </div>
           )}
           <p className="text-slate-500 text-sm mb-4 line-clamp-2">{owner?.bio}</p>
           <div className="flex justify-center gap-3">
-            {owner?.githubLink && <a href={owner.githubLink} target="_blank" className="p-2 bg-slate-50 rounded-full text-slate-600 hover:text-indigo-600 transition-colors"><Github className="w-5 h-5" /></a>}
-            {owner?.linkedinLink && <a href={owner.linkedinLink} target="_blank" className="p-2 bg-slate-50 rounded-full text-slate-600 hover:text-indigo-600 transition-colors"><Linkedin className="w-5 h-5" /></a>}
+            {owner?.githubLink && <a href={owner.githubLink} target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-50 rounded-full text-slate-600 hover:text-indigo-600 transition-colors"><Github className="w-5 h-5" /></a>}
+            {owner?.linkedinLink && <a href={owner.linkedinLink} target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-50 rounded-full text-slate-600 hover:text-indigo-600 transition-colors"><Linkedin className="w-5 h-5" /></a>}
           </div>
         </div>
 
@@ -744,7 +721,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Project Team</h3>
             <div className="space-y-4">
               {project.acceptedUsers.map((u: any) => {
-                const uid = typeof u === 'string' ? u : u?.id || u?._id;
+                const uid = getId(u);
                 const name = typeof u === 'string' ? 'User' : u?.name || 'User';
                 const profileImage = typeof u === 'string' ? null : u?.profileImage;
 
@@ -761,7 +738,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
                       />
                       <div>
                         <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{name}</p>
-                        <p className="text-xs text-slate-500">Collaborator</p>
+                        <p className="text-xs text-slate-500">{(uid && project.userRoles?.[uid]) || 'Collaborator'}</p>
                       </div>
                     </button>
                   </div>
@@ -783,7 +760,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
           ) : isOwner ? (
             <div className="text-center space-y-4">
               <p className="font-medium">You are the owner of this project.</p>
-              <button onClick={() => navigate('create')} className="w-full bg-indigo-500 text-white py-3 rounded-xl font-bold hover:bg-indigo-400 transition-colors">
+              <button onClick={() => navigate('create', projectId)} className="w-full bg-indigo-500 text-white py-3 rounded-xl font-bold hover:bg-indigo-400 transition-colors">
                 Edit Project
               </button>
             </div>
@@ -795,7 +772,7 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
               <p className="font-bold text-xl">You're in!</p>
               <p className="text-indigo-100 text-sm">You are an accepted collaborator for this project.</p>
             </div>
-          ) : existingRequest ? (
+          ) : existingRequest && existingRequest.status !== 'Rejected' ? (
             <div className="text-center space-y-4">
               <div className="bg-white/20 w-12 h-12 rounded-full flex items-center justify-center mx-auto">
                 <Clock className="w-6 h-6" />
@@ -803,13 +780,22 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
               <p className="font-bold">Request {existingRequest.status}</p>
               <p className="text-indigo-100 text-sm">Your application is currently being reviewed by the owner.</p>
             </div>
+          ) : project.status === 'Closed' || project.status === 'Completed' ? (
+            <div className="text-center space-y-2">
+              <p className="font-bold">This project is {project.status.toLowerCase()}.</p>
+              <p className="text-indigo-100 text-sm">It is not accepting new collaborators right now.</p>
+            </div>
           ) : (
             <div className="space-y-4">
               <h3 className="text-lg font-bold">Interested in joining?</h3>
+              {existingRequest?.status === 'Rejected' && (
+                <p className="text-indigo-100 text-sm">Your previous request was declined. You can send a new one.</p>
+              )}
               <textarea 
                 placeholder="Tell the owner why you're a good fit..."
                 value={requestMessage}
                 onChange={(e) => setRequestMessage(e.target.value)}
+                maxLength={1000}
                 className="w-full bg-indigo-700/50 border border-indigo-400/30 rounded-xl p-3 text-sm placeholder:text-indigo-300 outline-none focus:ring-2 focus:ring-white/50 min-h-[100px]"
               />
               <button 

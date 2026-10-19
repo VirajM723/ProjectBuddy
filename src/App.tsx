@@ -29,33 +29,69 @@ export const useAuth = () => {
   return context;
 };
 
+type Page = 'home' | 'profile' | 'create' | 'admin' | 'project';
+
+const isObjectId = (id?: string) => !!id && /^[a-f\d]{24}$/i.test(id);
+
+// Keeps the current page in the URL so refresh, sharing links, and the back button work
+function pathFor(page: Page, id?: string) {
+  switch (page) {
+    case 'project': return id ? `/project/${id}` : '/';
+    case 'profile': return id ? `/profile/${id}` : '/profile';
+    case 'create': return id ? `/project/${id}/edit` : '/create';
+    case 'admin': return '/admin';
+    default: return '/';
+  }
+}
+
+function parsePath(pathname: string): { page: Page; id?: string } {
+  const [first, id, action] = pathname.split('/').filter(Boolean);
+  if (first === 'project' && isObjectId(id)) return action === 'edit' ? { page: 'create', id } : { page: 'project', id };
+  if (first === 'profile') return { page: 'profile', id: isObjectId(id) ? id : undefined };
+  if (first === 'create') return { page: 'create' };
+  if (first === 'admin') return { page: 'admin' };
+  return { page: 'home' };
+}
+
 export default function App() {
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
-  const [currentPage, setCurrentPage] = useState<'home' | 'profile' | 'create' | 'admin' | 'project'>('home');
+  const [currentPage, setCurrentPage] = useState<Page>('home');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [editProjectId, setEditProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     const initAuth = async () => {
       const token = localStorage.getItem('token');
       const storedUser = localStorage.getItem('user');
       if (token && storedUser) {
-        const parsedUser = JSON.parse(storedUser);
-        setUser(parsedUser);
         try {
-          const profileData = await userService.getProfile(parsedUser.id);
+          // Validates the token and picks up any role/name changes since last login
+          const profileData = await authService.me();
+          const freshUser = { id: profileData.id, name: profileData.name, email: profileData.email, role: profileData.role };
+          localStorage.setItem('user', JSON.stringify(freshUser));
+          setUser(freshUser);
           setProfile(profileData);
         } catch (error) {
-          console.error('Failed to fetch profile', error);
+          console.error('Failed to restore session', error);
           logout();
         }
       }
       setLoading(false);
     };
     initAuth();
+
+    const initial = parsePath(window.location.pathname);
+    applyRoute(initial.page, initial.id);
+    const onPopState = () => {
+      const route = parsePath(window.location.pathname);
+      applyRoute(route.page, route.id);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   const signIn = async (credentials: any) => {
@@ -100,6 +136,7 @@ export default function App() {
     setUser(null);
     setProfile(null);
     setCurrentPage('home');
+    window.history.replaceState(null, '', '/');
   };
 
   const updateProfileState = (updatedProfile: UserProfile) => {
@@ -111,20 +148,29 @@ export default function App() {
     }
   };
 
-  const navigate = (page: 'home' | 'profile' | 'create' | 'admin' | 'project', id?: string) => {
+  const applyRoute = (page: Page, id?: string) => {
     if (page === 'profile') {
-      const targetId = id || user?.id;
-      if (targetId && targetId !== 'undefined' && targetId !== 'null') {
-        setProfileId(targetId);
-      } else {
-        setProfileId(null);
-      }
+      // No id means "my profile", resolved against the signed-in user at render time
+      setProfileId(isObjectId(id) ? id! : null);
     }
-    if (page === 'project' && id) {
-      setSelectedProjectId(id);
+    if (page === 'project') {
+      if (!id) page = 'home';
+      else setSelectedProjectId(id);
+    }
+    if (page === 'create') {
+      setEditProjectId(id || null);
     }
     setCurrentPage(page);
     window.scrollTo(0, 0);
+  };
+
+  const navigate = (page: Page, id?: string) => {
+    if (page === 'profile' && !isObjectId(id)) id = user?.id;
+    applyRoute(page, id);
+    const path = pathFor(page, id);
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
+    }
   };
 
   if (loading) {
@@ -150,7 +196,7 @@ export default function App() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <AnimatePresence mode="wait">
             <motion.div
-              key={currentPage + (selectedProjectId || '') + (profileId || '')}
+              key={currentPage + (currentPage === 'project' ? selectedProjectId || '' : '') + (currentPage === 'profile' ? profileId || '' : '') + (currentPage === 'create' ? editProjectId || '' : '')}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -158,7 +204,7 @@ export default function App() {
             >
               {currentPage === 'home' && <Home navigate={navigate} />}
               {currentPage === 'profile' && <Profile userId={profileId || user.id} navigate={navigate} />}
-              {currentPage === 'create' && <CreateProject navigate={navigate} />}
+              {currentPage === 'create' && <CreateProject navigate={navigate} projectId={editProjectId || undefined} />}
               {currentPage === 'admin' && <Admin />}
               {currentPage === 'project' && selectedProjectId && (
                 <ProjectDetails projectId={selectedProjectId} navigate={navigate} />

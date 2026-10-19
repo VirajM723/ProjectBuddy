@@ -209,6 +209,8 @@ Create a `.env` file.
 ``` env
 MONGODB_URI=
 JWT_SECRET=
+# Optional: comma-separated emails that get the admin role when they register
+ADMIN_EMAIL=
 PORT=
 ```
 
@@ -217,6 +219,15 @@ Start the development server.
 ``` bash
 npm run dev
 ```
+
+### Deploying to Render
+
+-   Build command: `npm install && npm run build`
+-   Start command: `npm start`
+-   Environment variables: `MONGODB_URI` and `JWT_SECRET` are required
+    (without `JWT_SECRET`, a random secret is generated on every restart
+    and all users are logged out). `ADMIN_EMAIL` is optional.
+-   Health check path: `/api/health`
 
 ## API Modules
 
