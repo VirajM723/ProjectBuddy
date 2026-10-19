@@ -16,4 +16,6 @@ const endorsementSchema = new mongoose.Schema({
   }
 });
 
+endorsementSchema.index({ endorsedUser: 1, skill: 1, endorsedBy: 1 });
+
 export const Endorsement = mongoose.model('Endorsement', endorsementSchema);

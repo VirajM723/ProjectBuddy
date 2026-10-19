@@ -25,6 +25,13 @@ api.interceptors.response.use(
         error.response.data.message = userWarning;
       }
     }
+    // Session expired or token invalid: clear it and return to the login screen
+    const url: string = error.config?.url || '';
+    if (error.response?.status === 401 && localStorage.getItem('token') && !url.startsWith('/auth/login') && !url.startsWith('/auth/register')) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.reload();
+    }
     return Promise.reject(error);
   }
 );
@@ -32,6 +39,7 @@ api.interceptors.response.use(
 export const authService = {
   login: (credentials: any) => api.post('/auth/login', credentials).then(res => res.data),
   register: (userData: any) => api.post('/auth/register', userData).then(res => res.data),
+  me: () => api.get('/auth/me').then(res => res.data),
 };
 
 export const projectService = {
@@ -42,6 +50,7 @@ export const projectService = {
   getById: (id: string) => api.get(`/projects/${id}`).then(res => res.data),
   create: (data: any) => api.post('/projects', data).then(res => res.data),
   update: (id: string, data: any) => api.put(`/projects/${id}`, data).then(res => res.data),
+  setMyRole: (id: string, role: string) => api.put(`/projects/${id}/role`, { role }).then(res => res.data),
 };
 
 export const userService = {
@@ -78,5 +87,12 @@ export const adminService = {
   deleteUser: (id: string) => api.delete(`/admin/users/${id}`).then(res => res.data),
   deleteProject: (id: string) => api.delete(`/admin/projects/${id}`).then(res => res.data),
 };
+
+// Server responses use `id`, but tolerate raw `_id` or a bare id string
+export const getId = (ref: any): string | undefined =>
+  ref == null ? undefined : typeof ref === 'string' ? ref : ref.id || ref._id;
+
+export const getErrorMessage = (err: any, fallback = 'Something went wrong. Please try again.') =>
+  err?.response?.data?.message || fallback;
 
 export default api;

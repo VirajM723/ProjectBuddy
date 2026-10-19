@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 
 const projectSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  summary: { type: String, required: true },
-  description: { type: String, required: true },
+  title: { type: String, required: true, trim: true, maxlength: 120 },
+  summary: { type: String, required: true, trim: true, maxlength: 300 },
+  description: { type: String, required: true, maxlength: 10000 },
   techStack: { type: [String], default: [] },
   requiredRoles: { type: [String], default: [] },
   commitmentLevel: { type: String, required: true },

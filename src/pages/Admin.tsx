@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Project, UserProfile } from '../types';
 import { useAuth } from '../App';
 import { ShieldAlert, Trash2, User as UserIcon, Layout } from 'lucide-react';
-import { adminService } from '../services/api';
+import { adminService, getId, getErrorMessage } from '../services/api';
 
 export function Admin() {
   const { user } = useAuth();
@@ -34,14 +34,15 @@ export function Admin() {
   }, [user]);
 
   const handleDeleteUser = async (userId: string) => {
-    if (!window.confirm('Are you sure you want to delete this user?')) return;
+    if (!window.confirm('Delete this user? Their projects, requests and activity will also be removed.')) return;
     try {
-      // We need to add a deleteUser to adminService if it doesn't exist
-      // For now, let's assume it's there or we'll add it
       await adminService.deleteUser(userId);
       setUsers(users.filter(u => u.id !== userId));
+      // The user's own projects are removed along with them
+      setProjects(projects.filter(p => getId(p.ownerId) !== userId));
     } catch (err) {
       console.error("Delete user error:", err);
+      alert(getErrorMessage(err, 'Failed to delete user.'));
     }
   };
 
@@ -52,6 +53,7 @@ export function Admin() {
       setProjects(projects.filter(p => p.id !== projectId));
     } catch (err) {
       console.error("Delete project error:", err);
+      alert(getErrorMessage(err, 'Failed to delete project.'));
     }
   };
 
@@ -118,7 +120,7 @@ export function Admin() {
               <div key={p.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                 <div>
                   <div className="font-bold text-slate-900">{p.title}</div>
-                  <div className="text-xs text-slate-500">Status: {p.status}</div>
+                  <div className="text-xs text-slate-500">Status: {p.status}{p.ownerId?.name ? ` · by ${p.ownerId.name}` : ''}</div>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => handleDeleteProject(p.id)} className="p-2 text-slate-400 hover:text-red-600 transition-colors">

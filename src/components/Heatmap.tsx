@@ -22,7 +22,7 @@ export function Heatmap({ logs }: HeatmapProps) {
     const svg = d3.select(svgRef.current)
       .attr('viewBox', `0 0 ${width} ${height}`)
       .attr('width', '100%')
-      .attr('height', 'auto');
+      .style('height', 'auto');
 
     svg.selectAll('*').remove();
 
