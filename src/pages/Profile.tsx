@@ -3,7 +3,33 @@ import { UserProfile, ContributionLog, Endorsement, Project } from '../types';
 import { useAuth } from '../App';
 import { Heatmap } from '../components/Heatmap';
 import { Github, Linkedin, ExternalLink, Award, Plus, Trash2, Edit3, Save, X, Phone, Rocket, CheckCircle, XCircle, Camera } from 'lucide-react';
-import { userService, logService, endorsementService, projectService } from '../services/api';
+import { userService, logService, endorsementService, projectService, getId, getErrorMessage } from '../services/api';
+
+// Downscales an uploaded image to a small square-ish JPEG so profile pictures stay lightweight
+function resizeImage(file: File, maxSize = 256): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the image file'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('That file does not look like a valid image'));
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Image processing is not supported in this browser'));
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 interface ProfileProps {
   userId?: string;
@@ -23,7 +49,8 @@ export function Profile({ userId, navigate }: ProfileProps) {
   const [tempRole, setTempRole] = useState('');
   const [editData, setEditData] = useState<Partial<UserProfile>>({});
   const [newSkill, setNewSkill] = useState('');
-  const [isCollaborator, setIsCollaborator] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const isOwnProfile = user?.id === userId;
 
@@ -37,7 +64,6 @@ export function Profile({ userId, navigate }: ProfileProps) {
     const fetchData = async () => {
       setLoading(true);
       try {
-        console.log("Profile: Fetching data for userId:", userId);
         const [profileData, logsData, endorsementsData, allProjects] = await Promise.all([
           userService.getProfile(userId),
           logService.getByUser(userId),
@@ -51,27 +77,13 @@ export function Profile({ userId, navigate }: ProfileProps) {
         setEndorsements(endorsementsData);
 
         // Filter projects
-        const owned = allProjects.filter((p: any) => (p.ownerId === userId || p.ownerId?.id === userId || p.ownerId?._id === userId));
+        const owned = allProjects.filter((p: any) => getId(p.ownerId) === userId);
         const collaborated = allProjects.filter((p: any) => 
-          p.acceptedUsers?.some((c: any) => (c === userId || c?.id === userId || c?._id === userId))
+          p.acceptedUsers?.some((c: any) => getId(c) === userId)
         );
         
         setUserProjects(owned);
         setCollaborations(collaborated);
-
-        // Check if collaborator
-        if (isOwnProfile) {
-          setIsCollaborator(true);
-        } else {
-          const areCollaborators = allProjects.some((p: any) => 
-            (p.ownerId === user.id || p.ownerId?.id === user.id || p.ownerId?._id === user.id) && 
-            p.acceptedUsers?.some((c: any) => (c === userId || c?.id === userId || c?._id === userId))
-          ) || allProjects.some((p: any) => 
-            (p.ownerId === userId || p.ownerId?.id === userId || p.ownerId?._id === userId) && 
-            p.acceptedUsers?.some((c: any) => (c === user.id || c?.id === user.id || c?._id === user.id))
-          );
-          setIsCollaborator(areCollaborators);
-        }
       } catch (err) {
         console.error("Error fetching profile data:", err);
       } finally {
@@ -80,43 +92,49 @@ export function Profile({ userId, navigate }: ProfileProps) {
     };
 
     fetchData();
-  }, [userId, user, isOwnProfile]);
+  }, [userId, user?.id]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      alert("Please select an image smaller than 2MB. This keeps profile loading fast!");
+    if (file.size > 10 * 1024 * 1024) {
+      setSaveError("Please select an image smaller than 10MB.");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      setEditData(prev => ({ ...prev, profileImage: base64String }));
-    };
-    reader.readAsDataURL(file);
+    setSaveError(null);
+    resizeImage(file)
+      .then(dataUrl => setEditData(prev => ({ ...prev, profileImage: dataUrl })))
+      .catch(err => setSaveError(err.message));
   };
 
   const handleSave = async () => {
     if (!userId) return;
+    setIsSaving(true);
+    setSaveError(null);
     try {
-      const updated = await userService.updateProfile(editData);
+      // Only send the editable fields
+      const { name, bio, profileImage, githubLink, linkedinLink, resumeLink, phoneNumber, skills } = editData;
+      const updated = await userService.updateProfile({ name, bio, profileImage, githubLink, linkedinLink, resumeLink, phoneNumber, skills });
       setProfile(updated);
+      setEditData(updated);
       setIsEditing(false);
       if (isOwnProfile && updateProfileState) {
         updateProfileState(updated);
       }
     } catch (err) {
       console.error("Save error:", err);
+      setSaveError(getErrorMessage(err, 'Failed to save your profile.'));
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleAddEndorsement = async (skill: string) => {
     if (!user || !profile || user.id === profile.id) return;
     
-    const existing = endorsements.find(e => e.skill === skill && e.endorsedBy === user.id);
+    const existing = endorsements.find(e => e.skill === skill && getId(e.endorsedBy) === user.id);
     if (existing) return;
 
     try {
@@ -127,6 +145,7 @@ export function Profile({ userId, navigate }: ProfileProps) {
       setEndorsements([...endorsements, newEndorsement]);
     } catch (err) {
       console.error("Endorsement error:", err);
+      alert(getErrorMessage(err, 'Failed to endorse this skill.'));
     }
   };
 
@@ -143,21 +162,15 @@ export function Profile({ userId, navigate }: ProfileProps) {
   const handleUpdateRole = async (projectId: string) => {
     if (!user) return;
     try {
-      // In MERN version, we'll need a specific endpoint or update the project
-      // For now, let's assume we can update the project's userRoles map
-      const project = userProjects.find(p => p.id === projectId) || collaborations.find(p => p.id === projectId);
-      if (project) {
-        const updatedRoles = { ...(project.userRoles || {}), [user.id]: tempRole };
-        await projectService.update(projectId, { userRoles: updatedRoles });
-        
-        // Update local state
-        const updateList = (list: Project[]) => list.map(p => p.id === projectId ? { ...p, userRoles: updatedRoles } : p);
-        setUserProjects(updateList(userProjects));
-        setCollaborations(updateList(collaborations));
-      }
+      // Owners and collaborators can each set their own role on a project
+      const { userRoles } = await projectService.setMyRole(projectId, tempRole.trim());
+      const updateList = (list: Project[]) => list.map(p => p.id === projectId ? { ...p, userRoles } : p);
+      setUserProjects(updateList);
+      setCollaborations(updateList);
       setEditingRoleProjectId(null);
     } catch (err) {
       console.error("Update role error:", err);
+      alert(getErrorMessage(err, 'Failed to update your role.'));
     }
   };
 
@@ -215,10 +228,10 @@ export function Profile({ userId, navigate }: ProfileProps) {
             {isOwnProfile && (
               isEditing ? (
                 <>
-                  <button onClick={handleSave} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-sm">
-                    <Save className="w-4 h-4" /> Save
+                  <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-60">
+                    <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save'}
                   </button>
-                  <button onClick={() => setIsEditing(false)} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-xl font-bold hover:bg-slate-200 transition-colors">
+                  <button onClick={() => { setIsEditing(false); setEditData(profile); setSaveError(null); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-xl font-bold hover:bg-slate-200 transition-colors">
                     <X className="w-4 h-4" /> Cancel
                   </button>
                 </>
@@ -230,6 +243,10 @@ export function Profile({ userId, navigate }: ProfileProps) {
             )}
           </div>
         </div>
+
+        {saveError && (
+          <p className="mt-4 text-sm font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2">{saveError}</p>
+        )}
 
         <div className="mt-8 flex flex-wrap gap-4 justify-center md:justify-start">
           {isEditing ? (
@@ -289,9 +306,9 @@ export function Profile({ userId, navigate }: ProfileProps) {
             </div>
           ) : (
             <>
-              {profile.githubLink && <a href={profile.githubLink} target="_blank" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><Github className="w-5 h-5" /> GitHub</a>}
-              {profile.linkedinLink && <a href={profile.linkedinLink} target="_blank" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><Linkedin className="w-5 h-5" /> LinkedIn</a>}
-              {profile.resumeLink && <a href={profile.resumeLink} target="_blank" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><ExternalLink className="w-5 h-5" /> Portfolio</a>}
+              {profile.githubLink && <a href={profile.githubLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><Github className="w-5 h-5" /> GitHub</a>}
+              {profile.linkedinLink && <a href={profile.linkedinLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><Linkedin className="w-5 h-5" /> LinkedIn</a>}
+              {profile.resumeLink && <a href={profile.resumeLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><ExternalLink className="w-5 h-5" /> Portfolio</a>}
               {profile.phoneNumber && (
                 <div className="flex items-center gap-2 text-slate-600 font-medium text-sm">
                   <Phone className="w-5 h-5 text-indigo-600" /> 
@@ -324,6 +341,8 @@ export function Profile({ userId, navigate }: ProfileProps) {
                 type="text"
                 value={newSkill}
                 onChange={(e) => setNewSkill(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSkill(); } }}
+                maxLength={40}
                 placeholder="Add a skill..."
                 className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
               />
@@ -336,7 +355,7 @@ export function Profile({ userId, navigate }: ProfileProps) {
           <div className="space-y-6">
             {(isEditing ? editData.skills : profile.skills)?.map(skill => {
               const skillEndorsements = endorsements.filter(e => e.skill === skill);
-              const hasEndorsed = skillEndorsements.some(e => e.endorsedBy === user?.id);
+              const hasEndorsed = skillEndorsements.some(e => getId(e.endorsedBy) === user?.id);
 
               return (
                 <div key={skill} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
