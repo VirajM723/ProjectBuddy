@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../App';
 import { Rocket, Tag, Users, Clock, Briefcase, AlertCircle, CheckCircle, Compass } from 'lucide-react';
 import { isSameDay } from 'date-fns';
-import { projectService, logService } from '../services/api';
+import { projectService, getId, getErrorMessage } from '../services/api';
 
 interface CreateProjectProps {
   navigate: (page: 'home' | 'profile' | 'create' | 'admin' | 'project', id?: string) => void;
+  projectId?: string; // When set, the form edits this existing project
 }
 
-export function CreateProject({ navigate }: CreateProjectProps) {
+export function CreateProject({ navigate, projectId }: CreateProjectProps) {
+  const isEditing = !!projectId;
   const { user } = useAuth();
   const [formData, setFormData] = useState({
     title: '',
@@ -28,15 +30,50 @@ export function CreateProject({ navigate }: CreateProjectProps) {
   const [locationName, setLocationName] = useState('');
   const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locLoading, setLocLoading] = useState(false);
+  const [loadingProject, setLoadingProject] = useState(isEditing);
+
+  // Load the existing project when editing
+  useEffect(() => {
+    if (!projectId) return;
+    const loadProject = async () => {
+      setLoadingProject(true);
+      try {
+        const p = await projectService.getById(projectId);
+        if (getId(p.ownerId) !== user?.id) {
+          setError('Only the project owner can edit this project.');
+          return;
+        }
+        setFormData({
+          title: p.title || '',
+          summary: p.summary || '',
+          description: p.description || '',
+          techStack: (p.techStack || []).join(', '),
+          requiredRoles: (p.requiredRoles || []).join(', '),
+          commitmentLevel: p.commitmentLevel || 'Low (1-5 hrs/week)',
+          projectType: p.projectType || 'Side Project',
+        });
+        if (p.locationName || p.locationCoords?.lat != null) {
+          setIncludeLocation(true);
+          setLocationName(p.locationName || '');
+          setLocationCoords(p.locationCoords?.lat != null ? p.locationCoords : null);
+        }
+      } catch (err) {
+        setError(getErrorMessage(err, 'Failed to load project.'));
+      } finally {
+        setLoadingProject(false);
+      }
+    };
+    loadProject();
+  }, [projectId, user?.id]);
 
   useEffect(() => {
     const checkRateLimit = async () => {
-      if (!user) return;
+      if (!user || isEditing) return;
       try {
         // Fetch all projects and filter for user's projects created today
         // In a real app, this should be a backend check
         const projects = await projectService.getAll();
-        const myProjects = projects.filter((p: any) => p.ownerId === user.id || p.ownerId?.id === user.id || p.ownerId?._id === user.id);
+        const myProjects = projects.filter((p: any) => getId(p.ownerId) === user.id);
         const todayProjects = myProjects.filter((p: any) => isSameDay(new Date(p.createdAt), new Date()));
         
         if (todayProjects.length >= 5) {
@@ -47,11 +84,11 @@ export function CreateProject({ navigate }: CreateProjectProps) {
       }
     };
     checkRateLimit();
-  }, [user]);
+  }, [user, isEditing]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || rateLimitReached) return;
+    if (!user || (rateLimitReached && !isEditing)) return;
     
     setIsSubmitting(true);
     setError(null);
@@ -65,29 +102,27 @@ export function CreateProject({ navigate }: CreateProjectProps) {
         requiredRoles: formData.requiredRoles.split(',').map(s => s.trim()).filter(Boolean),
         commitmentLevel: formData.commitmentLevel,
         projectType: formData.projectType,
-        status: 'Open' as const,
-        locationName: includeLocation ? locationName : undefined,
-        locationCoords: includeLocation && locationCoords ? locationCoords : undefined,
+        locationName: includeLocation ? locationName : '',
+        // null clears any saved location when editing
+        locationCoords: includeLocation && locationCoords ? locationCoords : null,
       };
 
-      const newProject = await projectService.create(projectData);
+      // The server records the owner's "Joined" contribution when a project is created
+      const saved = isEditing
+        ? await projectService.update(projectId!, projectData)
+        : await projectService.create(projectData);
 
-      // Add contribution log for owner
-      await logService.create({
-        projectId: newProject.id,
-        contributionType: 'Joined',
-      });
-
-      navigate('project', newProject.id);
+      navigate('project', saved.id);
     } catch (err: any) {
-      console.error("Project creation failed:", err);
-      setError(err.response?.data?.message || 'Failed to create project. Please try again.');
+      console.error("Project save failed:", err);
+      setError(getErrorMessage(err, `Failed to ${isEditing ? 'update' : 'create'} project. Please try again.`));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   if (!user) return <div className="text-center py-20">Please sign in to post a project.</div>;
+  if (loadingProject) return <div className="animate-pulse max-w-3xl mx-auto"><div className="h-96 bg-slate-200 rounded-3xl"></div></div>;
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -97,12 +132,12 @@ export function CreateProject({ navigate }: CreateProjectProps) {
             <Rocket className="w-8 h-8" />
           </div>
           <div>
-            <h1 className="text-3xl font-extrabold text-slate-900">Post a Project</h1>
-            <p className="text-slate-500">Share your idea and find collaborators.</p>
+            <h1 className="text-3xl font-extrabold text-slate-900">{isEditing ? 'Edit Project' : 'Post a Project'}</h1>
+            <p className="text-slate-500">{isEditing ? 'Update the details of your project.' : 'Share your idea and find collaborators.'}</p>
           </div>
         </div>
 
-        {rateLimitReached && (
+        {rateLimitReached && !isEditing && (
           <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3 mb-8">
             <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             <div>
@@ -120,6 +155,7 @@ export function CreateProject({ navigate }: CreateProjectProps) {
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              maxLength={120}
               placeholder="e.g. AI-Powered Task Manager"
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
             />
@@ -132,6 +168,7 @@ export function CreateProject({ navigate }: CreateProjectProps) {
               type="text"
               value={formData.summary}
               onChange={(e) => setFormData({ ...formData, summary: e.target.value })}
+              maxLength={300}
               placeholder="A brief one-liner about your project"
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
             />
@@ -219,7 +256,9 @@ export function CreateProject({ navigate }: CreateProjectProps) {
                 checked={includeLocation}
                 onChange={(e) => {
                   setIncludeLocation(e.target.checked);
-                  if (e.target.checked) {
+                  if (e.target.checked && !navigator.geolocation) {
+                    setLocationCoords(null);
+                  } else if (e.target.checked) {
                     setLocLoading(true);
                     navigator.geolocation.getCurrentPosition(
                       async (position) => {
@@ -301,10 +340,10 @@ export function CreateProject({ navigate }: CreateProjectProps) {
 
           <button 
             type="submit"
-            disabled={isSubmitting || rateLimitReached}
+            disabled={isSubmitting || (rateLimitReached && !isEditing)}
             className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-8"
           >
-            {isSubmitting ? 'Posting...' : 'Launch Project'}
+            {isSubmitting ? (isEditing ? 'Saving...' : 'Posting...') : (isEditing ? 'Save Changes' : 'Launch Project')}
             <CheckCircle className="w-5 h-5" />
           </button>
         </form>

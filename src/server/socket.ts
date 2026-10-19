@@ -3,14 +3,20 @@ import jwt from 'jsonwebtoken';
 import { ChatRoom } from './models/ChatRoom.js';
 import { Message } from './models/Message.js';
 import { Project } from './models/Project.js';
+import { JWT_SECRET } from './config.js';
+import { cleanString, isValidId } from './utils/validation.js';
+import { isProjectMember } from './utils/membership.js';
+import { getOrCreateChatRoom } from './utils/chat.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+// Simple per-socket flood protection: at most 20 messages per 10 seconds
+const MESSAGE_WINDOW_MS = 10_000;
+const MESSAGE_LIMIT = 20;
 
 export function setupSocket(io: Server) {
   // Middleware to authenticate socket connections using JWT
   io.use((socket: Socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
-    if (!token) {
+    if (!token || typeof token !== 'string') {
       return next(new Error('Authentication error: No token provided'));
     }
     
@@ -28,12 +34,16 @@ export function setupSocket(io: Server) {
 
   io.on('connection', (socket: Socket) => {
     const userId = (socket as any).userId;
-    console.log(`Socket user connected: ${userId} (${socket.id})`);
+    let sentTimestamps: number[] = [];
 
     // Join a project room (projectId)
-    socket.on('join_project_room', async ({ projectId }) => {
+    socket.on('join_project_room', async (payload) => {
       try {
-        if (!projectId) return;
+        const projectId = payload?.projectId;
+        if (!isValidId(projectId)) {
+          socket.emit('error_message', { message: 'Invalid project ID' });
+          return;
+        }
 
         // Verify if the user is authorized to join the room (must be project owner OR an accepted user)
         const project = await Project.findById(projectId);
@@ -42,43 +52,22 @@ export function setupSocket(io: Server) {
           return;
         }
 
-        const isOwner = project.ownerId.toString() === userId;
-        const isAccepted = project.acceptedUsers.some(u => u.toString() === userId);
-
-        if (!isOwner && !isAccepted) {
+        if (!isProjectMember(project, userId)) {
           socket.emit('error_message', { message: 'Access denied: You are not an accepted member of this project' });
           return;
         }
 
-        // Get or create the physical MongoDB ChatRoom for this project
-        let chatRoom = await ChatRoom.findOne({ projectId });
-        if (!chatRoom) {
-          chatRoom = new ChatRoom({
-            projectId,
-            members: [project.ownerId, ...project.acceptedUsers]
-          });
-          await chatRoom.save();
-        } else {
-          // Sync members just in case new members were joined recently
-          const currentMembers = [project.ownerId.toString(), ...project.acceptedUsers.map(u => u.toString())];
-          const dbMembers = chatRoom.members.map(m => m.toString());
-          
-          const needsSync = currentMembers.some(m => !dbMembers.includes(m)) || dbMembers.length !== currentMembers.length;
-          if (needsSync) {
-            chatRoom.members = [project.ownerId, ...project.acceptedUsers] as any;
-            await chatRoom.save();
-          }
-        }
+        const chatRoom = await getOrCreateChatRoom(project);
 
         // Physically join the Socket.io room matching the ChatRoom ID
         const roomId = chatRoom._id.toString();
         socket.join(roomId);
 
-        // Fetch past messages
-        const pastMessages = await Message.find({ roomId })
+        // Latest 100 messages, oldest-first
+        const pastMessages = (await Message.find({ roomId })
           .populate('senderId', 'name profileImage')
-          .sort({ createdAt: 1 })
-          .limit(100);
+          .sort({ createdAt: -1 })
+          .limit(100)).reverse();
 
         // Notify client they successfully joined
         socket.emit('room_joined', {
@@ -94,9 +83,19 @@ export function setupSocket(io: Server) {
     });
 
     // Send a message
-    socket.on('send_message', async ({ roomId, text }) => {
+    socket.on('send_message', async (payload) => {
       try {
-        if (!roomId || !text || !text.trim()) return;
+        const roomId = payload?.roomId;
+        const text = cleanString(payload?.text, 2000);
+        if (!isValidId(roomId) || !text) return;
+
+        const now = Date.now();
+        sentTimestamps = sentTimestamps.filter(t => now - t < MESSAGE_WINDOW_MS);
+        if (sentTimestamps.length >= MESSAGE_LIMIT) {
+          socket.emit('error_message', { message: 'You are sending messages too quickly' });
+          return;
+        }
+        sentTimestamps.push(now);
 
         // Verify user belongs to this chat room
         const chatRoom = await ChatRoom.findById(roomId);
@@ -111,24 +110,13 @@ export function setupSocket(io: Server) {
           return;
         }
 
-        const isOwner = project.ownerId.toString() === userId;
-        const isAccepted = project.acceptedUsers.some(u => u.toString() === userId);
-        if (!isOwner && !isAccepted) {
+        if (!isProjectMember(project, userId)) {
           socket.emit('error_message', { message: 'Unauthorized: You are not a member of this project' });
           return;
         }
 
-        // Save message to database
-        const message = new Message({
-          roomId,
-          senderId: userId,
-          text: text.trim()
-        });
-        await message.save();
-
-        // Populate message sender profile and broadcast
-        const populatedMessage = await Message.findById(message._id)
-          .populate('senderId', 'name profileImage');
+        const message = await Message.create({ roomId, senderId: userId, text });
+        const populatedMessage = await message.populate('senderId', 'name profileImage');
 
         // Broadcast to all clients in the room including the sender
         io.to(roomId).emit('new_message', populatedMessage);
@@ -137,10 +125,6 @@ export function setupSocket(io: Server) {
         console.error('Error in send_message:', err);
         socket.emit('error_message', { message: 'Failed to send message' });
       }
-    });
-
-    socket.on('disconnect', () => {
-      console.log(`Socket user disconnected: ${userId} (${socket.id})`);
     });
   });
 }

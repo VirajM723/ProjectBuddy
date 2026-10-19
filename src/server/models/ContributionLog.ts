@@ -20,4 +20,7 @@ const contributionLogSchema = new mongoose.Schema({
   }
 });
 
+contributionLogSchema.index({ userId: 1, createdAt: -1 });
+contributionLogSchema.index({ projectId: 1, createdAt: -1 });
+
 export const ContributionLog = mongoose.model('ContributionLog', contributionLogSchema);
