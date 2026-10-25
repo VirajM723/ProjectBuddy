@@ -1,7 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { ContributionLog } from '../types';
 import { subDays, format, eachDayOfInterval, startOfDay } from 'date-fns';
+
+// Empty, then four steps of the one data hue
+const LEVELS = ['#eeeeee', '#d3e0f3', '#94b4e3', '#5585cf', '#1d5fbf'];
 
 interface HeatmapProps {
   logs: ContributionLog[];
@@ -9,20 +12,30 @@ interface HeatmapProps {
 
 export function Heatmap({ logs }: HeatmapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(800);
+
+  // Cells grow with the card instead of scaling the drawing, so labels stay at their real size
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.max(700, Math.floor(entry.contentRect.width))));
+    observer.observe(wrapRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!svgRef.current) return;
 
-    const width = 800;
-    const height = 130;
-    const cellSize = 12;
-    const cellPadding = 2;
-    const margin = { top: 20, right: 20, bottom: 20, left: 40 };
+    const margin = { top: 20, right: 0, bottom: 2, left: 34 };
+    const cellPadding = 3;
+    const cellSize = Math.min(18, Math.floor((width - margin.left - margin.right) / 53) - cellPadding);
+    const height = margin.top + 7 * (cellSize + cellPadding) + margin.bottom;
 
     const svg = d3.select(svgRef.current)
       .attr('viewBox', `0 0 ${width} ${height}`)
-      .attr('width', '100%')
-      .style('height', 'auto');
+      .attr('width', width)
+      .attr('height', height);
 
     svg.selectAll('*').remove();
 
@@ -41,23 +54,23 @@ export function Heatmap({ logs }: HeatmapProps) {
 
     const colorScale = d3.scaleThreshold<number, string>()
       .domain([1, 2, 4, 6])
-      .range(['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#216e39']);
+      .range(LEVELS);
 
     const g = svg.append('g')
       .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    // Day labels
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    // Day labels, every other day so they stay legible
+    const days = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
     g.selectAll('.day-label')
       .data(days)
       .enter()
       .append('text')
-      .attr('x', -10)
+      .attr('x', -8)
       .attr('y', (d, i) => i * (cellSize + cellPadding) + cellSize / 2)
       .attr('dy', '0.35em')
       .attr('text-anchor', 'end')
-      .attr('font-size', '9px')
-      .attr('fill', '#94a3b8')
+      .attr('font-size', '11px')
+      .attr('fill', '#6b6b6b')
       .text(d => d);
 
     // Month labels
@@ -70,9 +83,9 @@ export function Heatmap({ logs }: HeatmapProps) {
         const weekNum = d3.timeWeek.count(startDate, d);
         return weekNum * (cellSize + cellPadding);
       })
-      .attr('y', -5)
-      .attr('font-size', '10px')
-      .attr('fill', '#64748b')
+      .attr('y', -6)
+      .attr('font-size', '11px')
+      .attr('fill', '#6b6b6b')
       .text(d => format(d, 'MMM'));
 
     // Cells
@@ -96,21 +109,24 @@ export function Heatmap({ logs }: HeatmapProps) {
         return `${count} contributions on ${format(d, 'MMM d, yyyy')}`;
       });
 
-  }, [logs]);
+
+    // On narrow screens the grid scrolls; start at the most recent weeks
+    if (scrollRef.current) scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+  }, [logs, width]);
 
   return (
-    <div className="overflow-x-auto bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-      <div className="min-w-[700px]">
-        <svg ref={svgRef}></svg>
+    <div>
+      <div ref={scrollRef} className="overflow-x-auto">
+        <div ref={wrapRef} className="min-w-[700px]">
+          <svg ref={svgRef} role="img" aria-label="Contributions per day over the last year"></svg>
+        </div>
       </div>
-      <div className="mt-4 flex items-center justify-end gap-2 text-[10px] text-slate-400">
+      <div className="mt-2 flex items-center justify-end gap-2 text-xs text-muted">
         <span>Less</span>
         <div className="flex gap-1">
-          <div className="w-3 h-3 rounded-[2px] bg-[#ebedf0]"></div>
-          <div className="w-3 h-3 rounded-[2px] bg-[#9be9a8]"></div>
-          <div className="w-3 h-3 rounded-[2px] bg-[#40c463]"></div>
-          <div className="w-3 h-3 rounded-[2px] bg-[#30a14e]"></div>
-          <div className="w-3 h-3 rounded-[2px] bg-[#216e39]"></div>
+          {LEVELS.map(color => (
+            <span key={color} className="w-3 h-3 rounded-[2px]" style={{ background: color }} />
+          ))}
         </div>
         <span>More</span>
       </div>

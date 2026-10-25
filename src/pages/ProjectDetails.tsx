@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { Project, UserProfile, CollaborationRequest } from '../types';
 import { useAuth } from '../App';
-import { Calendar, Users, Tag, Briefcase, Clock, Send, CheckCircle, XCircle, Github, Linkedin, MessageSquare, Plus, Activity, Star } from 'lucide-react';
+import { Send, Github, Linkedin, ChevronLeft } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import Markdown from 'react-markdown';
 import { projectService, userService, collaborationService, logService, chatService, getId, getErrorMessage } from '../services/api';
 import { io, Socket } from 'socket.io-client';
+import { Avatar, Button, ErrorText, Pill, SeatStrip, buttonStyles, cardStyles, cx, inputStyles, isRecruiting, labelStyles, openRoles, projectStatusTone, requestStatusTone, seatSummary, teamSize } from '../components/ui';
 
-const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>';
 
 interface ProjectDetailsProps {
   projectId: string;
@@ -140,11 +140,10 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
     }
   }, [activeTab, projectId, socketStatus]);
 
-  // Scroll to bottom on updates
+  // Keep the newest message in view without scrolling the whole page
   useEffect(() => {
-    if (activeTab === 'chat') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+    const list = messagesEndRef.current;
+    if (activeTab === 'chat' && list) list.scrollTop = list.scrollHeight;
   }, [messages, activeTab]);
 
   const handleSendMessage = async () => {
@@ -272,543 +271,445 @@ export function ProjectDetails({ projectId, navigate }: ProjectDetailsProps) {
     }
   };
 
-  if (loading) return <div className="animate-pulse space-y-8"><div className="h-64 bg-slate-200 rounded-3xl"></div></div>;
-  if (!project) return <div className="text-center py-20">Project not found.</div>;
+  if (loading) {
+    return (
+      <div aria-busy="true">
+        <div className="h-4 w-20 bg-raised rounded" />
+        <div className="h-7 w-80 max-w-full bg-raised rounded mt-4" />
+        <div className="h-4 w-96 max-w-full bg-raised rounded mt-2" />
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-3 mt-6">
+          <div className={cx(cardStyles, 'h-80')} />
+          <div className={cx(cardStyles, 'h-56')} />
+        </div>
+      </div>
+    );
+  }
+  if (!project) {
+    return (
+      <div>
+        <h1 className="text-2xl font-medium">Project not found</h1>
+        <p className="text-muted mt-1">It may have been deleted by its owner. <a href="/" onClick={(e) => { e.preventDefault(); navigate('home'); }} className="text-ink underline underline-offset-2">Back to projects</a></p>
+      </div>
+    );
+  }
+
+  const open = openRoles(project);
+  const members: any[] = (project.acceptedUsers || []).filter((m: any) => getId(m) !== projectOwnerId);
+  const pendingCount = requests.filter(r => r.status === 'Pending').length;
+  const ownerFirstName = owner?.name?.split(' ')[0] || 'the owner';
+  const tabs: { id: typeof activeTab; label: string }[] = [
+    { id: 'details', label: 'Overview' },
+    ...(isOwner || isAccepted ? [
+      { id: 'chat' as const, label: 'Team chat' },
+      { id: 'milestones' as const, label: 'Progress' },
+    ] : []),
+  ];
+  const details: [string, string | undefined][] = [
+    ['Time each week', project.commitmentLevel],
+    ['Kind of project', project.projectType],
+    ['Stack', project.techStack.join(', ')],
+    ['Location', project.locationName],
+  ];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      {/* Main Content */}
-      <div className="lg:col-span-2 space-y-8">
-        <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-          {actionError && (
-            <p className="mb-4 text-sm font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2">{actionError}</p>
-          )}
-          <div className="flex justify-between items-start gap-4 mb-6">
-            <h1 className="text-3xl font-extrabold text-slate-900 break-words min-w-0">{project.title}</h1>
-            <div className="flex items-center gap-4">
-              {isOwner ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Status:</span>
-                  <select 
-                    value={project.status}
-                    onChange={(e) => handleStatusChange(e.target.value as any)}
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {['Open', 'Ongoing', 'Completed', 'Closed', 'Reopened'].map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <span className={`px-3 py-1 rounded-full text-sm font-bold ${
-                  project.status === 'Open' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
-                }`}>
-                  {project.status}
-                </span>
-              )}
-            </div>
-          </div>
+    <div>
+      <a
+        href="/"
+        onClick={(e) => { e.preventDefault(); navigate('home'); }}
+        className="inline-flex items-center gap-1 text-sm text-muted hover:text-ink"
+      >
+        <ChevronLeft className="w-4 h-4" strokeWidth={1.5} />
+        Projects
+      </a>
 
-          <div className="flex flex-wrap gap-6 text-slate-500 text-sm mb-8">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-indigo-500" />
-              <span>Posted {format(new Date(project.createdAt), 'MMM d, yyyy')}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Briefcase className="w-5 h-5 text-indigo-500" />
-              <span>{project.projectType}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-indigo-500" />
-              <span>{project.commitmentLevel} commitment</span>
-            </div>
-          </div>
-
-          {/* Tab Header */}
-          <div className="flex border-b border-slate-100 mb-6 font-medium gap-6 mt-4">
-            <button
-              onClick={() => setActiveTab('details')}
-              className={`pb-3 px-1 border-b-2 text-sm transition-all ${
-                activeTab === 'details' 
-                  ? 'border-indigo-600 text-indigo-600 font-bold' 
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
+      {/* Title row */}
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 max-w-3xl">
+          <h1 className="text-2xl font-medium tracking-[-0.01em] break-words">{project.title}</h1>
+          <p className="text-muted mt-1">{project.summary}</p>
+          <p className="text-muted mt-2 text-sm">
+            Posted by{' '}
+            <a
+              href={owner ? `/profile/${owner.id}` : '#'}
+              onClick={(e) => { e.preventDefault(); owner && navigate('profile', owner.id); }}
+              className="text-ink hover:underline underline-offset-2"
             >
-              Overview
-            </button>
-            
-            {(isOwner || isAccepted) && (
-              <>
-                <button
-                  onClick={() => setActiveTab('chat')}
-                  className={`pb-3 px-1 border-b-2 text-sm transition-all flex items-center gap-1.5 ${
-                    activeTab === 'chat' 
-                      ? 'border-indigo-600 text-indigo-600 font-bold' 
-                      : 'border-transparent text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Live Workspace Chat
-                  <span className={`w-2 h-2 rounded-full ${socketStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : socketStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 'bg-slate-300'}`}></span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('milestones')}
-                  className={`pb-3 px-1 border-b-2 text-sm transition-all ${
-                    activeTab === 'milestones' 
-                      ? 'border-indigo-600 text-indigo-600 font-bold' 
-                      : 'border-transparent text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Milestones & Progress
-                </button>
-              </>
-            )}
-          </div>
-
-          {activeTab === 'details' && (
+              {owner?.name || 'a deleted user'}
+            </a>
+            {' · '}{format(new Date(project.createdAt), 'd MMM yyyy')}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {isOwner ? (
             <>
-              <div className="prose prose-indigo max-w-none">
-                <h3 className="text-xl font-bold mb-4 text-slate-800">Description</h3>
-                <div className="text-slate-600 leading-relaxed">
-                  <Markdown>{project.description}</Markdown>
-                </div>
-              </div>
-
-              <div className="mt-8 pt-8 border-t border-slate-100">
-                <h3 className="text-xl font-bold mb-4 text-slate-800">Tech Stack</h3>
-                <div className="flex flex-wrap gap-2">
-                  {project.techStack.map(tech => (
-                    <span key={tech} className="bg-slate-50 text-slate-700 px-3 py-1.5 rounded-xl border border-slate-200 text-sm font-medium">
-                      {tech}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-8 pt-8 border-t border-slate-100">
-                <h3 className="text-xl font-bold mb-4 text-slate-800">Required Roles</h3>
-                <div className="flex flex-wrap gap-2">
-                  {project.requiredRoles.map(role => (
-                    <span key={role} className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl border border-indigo-100 text-sm font-medium">
-                      {role}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          {activeTab === 'chat' && (
-            <div className="space-y-4 pt-2">
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/50 flex flex-col h-[400px] overflow-y-auto space-y-4">
-                {messages.length > 0 ? (
-                  <>
-                    {messages.map((msg, index) => {
-                      const isMe = getId(msg.senderId) === user?.id;
-                      const senderName = msg.senderId?.name || (isMe ? user?.name : 'Partner');
-                      const imgUrl = msg.senderId?.profileImage || DEFAULT_AVATAR;
-
-                      return (
-                        <div key={getId(msg) || index} className={`flex items-start gap-2.5 ${isMe ? 'flex-row-reverse' : ''}`}>
-                          <img 
-                            src={imgUrl} 
-                            alt={senderName} 
-                            className="w-8 h-8 rounded-full border border-slate-200"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className={`flex flex-col max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className="text-xs font-bold text-slate-700">{senderName}</span>
-                              <span className="text-[10px] text-slate-400">
-                                {msg.createdAt ? formatDistanceToNow(new Date(msg.createdAt)) + ' ago' : ''}
-                              </span>
-                            </div>
-                            <div className={`p-3 rounded-2xl text-sm whitespace-pre-wrap break-words max-w-full ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white text-slate-800 border border-slate-200/60 rounded-tl-none shadow-sm'}`}>
-                              {msg.text}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <div ref={messagesEndRef} />
-                  </>
-                ) : (
-                  <div className="m-auto text-center space-y-2">
-                    <MessageSquare className="w-10 h-10 text-slate-300 mx-auto" />
-                    <p className="text-slate-400 text-sm">No messages yet. Send a note to say hi!</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <input 
-                  type="text"
-                  value={newMessageText}
-                  onChange={(e) => setNewMessageText(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleSendMessage()}
-                  maxLength={2000}
-                  placeholder="Type a message..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                />
-                <button
-                  onClick={handleSendMessage}
-                  disabled={!newMessageText.trim()}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 flex items-center justify-center transition-colors disabled:opacity-50"
+              <label className="flex items-center gap-2 text-sm text-muted">
+                Status
+                <select
+                  value={project.status}
+                  onChange={(e) => handleStatusChange(e.target.value as any)}
+                  className="h-9 pl-3 pr-8 bg-surface border border-control rounded-md text-sm text-ink outline-none focus:border-ink"
                 >
-                  <Send className="w-4 h-4" />
-                </button>
-              </div>
-              {chatError && <p className="text-xs font-medium text-red-600">{chatError}</p>}
-            </div>
-          )}
-
-          {activeTab === 'milestones' && (
-            <div className="space-y-6 pt-2">
-              {/* Creator Box: Project Owner can log a Milestone / Task progress */}
-              {(isOwner || isAccepted) && (
-                <form onSubmit={handleCreateLog} className="bg-slate-50 border border-slate-200/65 p-5 rounded-2xl space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-200/50 pb-2.5">
-                    <h4 className="font-bold text-slate-800 flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-indigo-600" />
-                      Add Milestone / Track Task
-                    </h4>
-                    <div className="flex gap-1.5 bg-white border border-slate-200 rounded-lg p-0.5">
-                      {['Milestone', 'Task'].map((type) => (
-                        <button
-                          key={type}
-                          type="button"
-                          onClick={() => setLogType(type as any)}
-                          className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                            logType === type 
-                              ? 'bg-indigo-600 text-white' 
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          {type}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="sm:col-span-2 space-y-1">
-                      <span className="text-xs font-bold text-slate-600">Progress Title</span>
-                      <input 
-                        required
-                        type="text"
-                        value={logTitle}
-                        onChange={(e) => setLogTitle(e.target.value)}
-                        placeholder="e.g. Completed Database Migrations"
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <button 
-                        type="submit"
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
-                      >
-                        <Plus className="w-4 h-4" /> Save
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold text-slate-600">Additional Details (Optional)</span>
-                    <input 
-                      type="text"
-                      value={logDetails}
-                      onChange={(e) => setLogDetails(e.target.value)}
-                      maxLength={2000}
-                      placeholder="e.g. Configured mongoose rules, generated cluster hooks..."
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-                  {logError && <p className="text-xs font-medium text-red-600">{logError}</p>}
-                </form>
-              )}
-
-              {/* Progress Timeline Feed */}
-              <div className="space-y-4">
-                <h4 className="font-bold text-slate-800 flex items-center gap-2">
-                  <Star className="w-4 h-4 text-emerald-500" />
-                  Project Activity & Milestones Timeline
-                </h4>
-
-                {logsLoading ? (
-                  <div className="space-y-3 h-24 animate-pulse bg-slate-50 rounded-xl"></div>
-                ) : projectLogs.length > 0 ? (
-                  <div className="relative border-l border-indigo-100 ml-4 space-y-6 py-2">
-                    {projectLogs.map((log, index) => {
-                      const logUser = log.userId;
-                      const logName = logUser?.name || 'Teammate';
-                      const logImg = logUser?.profileImage || DEFAULT_AVATAR;
-
-                      return (
-                        <div key={getId(log) || index} className="relative pl-6">
-                          {/* Dot marker */}
-                          <span className={`absolute -left-[6.5px] top-1.5 w-3 h-3 rounded-full border bg-white ${
-                            log.contributionType === 'Milestone' ? 'border-amber-400 bg-amber-50 shadow-md ring-2 ring-amber-100' :
-                            log.contributionType === 'Task' ? 'border-emerald-400 bg-emerald-50' : 'border-indigo-400 bg-indigo-50'
-                          }`}></span>
-
-                          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                              <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full inline-block ${
-                                log.contributionType === 'Milestone' ? 'bg-amber-100 text-amber-800' :
-                                log.contributionType === 'Task' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-800'
-                              }`}>
-                                {log.contributionType}
-                              </span>
-                              <span className="text-[10px] text-slate-400 font-medium">
-                                {formatDistanceToNow(new Date(log.createdAt))} ago
-                              </span>
-                            </div>
-
-                            <h5 className="font-bold text-slate-800 text-sm sm:text-base">
-                              {log.title || `${logName} joined the project`}
-                            </h5>
-
-                            {log.details && (
-                              <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap leading-relaxed bg-white border border-slate-100 rounded-lg p-2">
-                                {log.details}
-                              </p>
-                            )}
-
-                            <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-200/50">
-                              <img 
-                                src={logImg} 
-                                className="w-5 h-5 rounded-full border border-slate-200"
-                                referrerPolicy="no-referrer"
-                              />
-                              <span className="text-xs font-semibold text-slate-600">{logName}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    No milestone or contribution logs tracked yet.
-                  </div>
-                )}
-              </div>
-            </div>
+                  {['Open', 'Ongoing', 'Completed', 'Closed', 'Reopened'].map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+              <Button onClick={() => navigate('create', projectId)}>Edit project</Button>
+            </>
+          ) : (
+            <Pill tone={projectStatusTone(project.status)}>{project.status}</Pill>
           )}
         </div>
-
-        {/* Requests Section for Owner */}
-        {isOwner && (
-          <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-            <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-              <Users className="w-6 h-6 text-indigo-600" />
-              Collaboration Requests
-            </h3>
-            <div className="space-y-4">
-              {requests.length > 0 ? (
-                requests.map(req => (
-                  <div key={req.id} className="p-4 border border-slate-100 rounded-2xl bg-slate-50 flex flex-col sm:flex-row justify-between gap-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        {(() => {
-                          const reqUserId = getId(req.userId);
-                          const profile = typeof req.userId === 'string' ? null : req.userId;
-                          return (
-                            <button 
-                              onClick={() => navigate('profile', reqUserId)}
-                              className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-                            >
-                              <img 
-                                src={profile?.profileImage || DEFAULT_AVATAR} 
-                                className="w-8 h-8 rounded-full border border-slate-200"
-                                referrerPolicy="no-referrer"
-                              />
-                              <span className="font-bold text-slate-900 hover:text-indigo-600 transition-colors">
-                                {profile?.name || 'Deleted user'}
-                              </span>
-                            </button>
-                          );
-                        })()}
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          req.status === 'Pending' ? 'bg-amber-50 text-amber-700' :
-                          req.status === 'Accepted' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-                        }`}>
-                          {req.status}
-                        </span>
-                      </div>
-                      {(() => {
-                        const profile = typeof req.userId === 'string' ? null : req.userId;
-                        if (!profile) return null;
-                        return (
-                          <div className="space-y-1">
-                            {profile.bio && <p className="text-xs text-slate-500 line-clamp-1">{profile.bio}</p>}
-                            {profile.skills && profile.skills.length > 0 && (
-                              <div className="flex flex-wrap gap-1">
-                                {profile.skills.slice(0, 3).map((s: string) => (
-                                  <span key={s} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md">
-                                    {s}
-                                  </span>
-                                ))}
-                                {profile.skills.length > 3 && <span className="text-[10px] text-slate-400">+{profile.skills.length - 3} more</span>}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                      <p className="text-slate-600 text-sm italic">"{req.message}"</p>
-                    </div>
-                    {req.status === 'Pending' && (
-                      <div className="flex gap-2 shrink-0">
-                        <button 
-                          onClick={() => handleRequestAction(req, 'Accepted')}
-                          className="flex items-center gap-1 bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 transition-colors"
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                          Accept
-                        </button>
-                        <button 
-                          onClick={() => handleRequestAction(req, 'Rejected')}
-                          className="flex items-center gap-1 bg-white text-red-600 border border-red-200 px-3 py-2 rounded-xl text-sm font-bold hover:bg-red-50 transition-colors"
-                        >
-                          <XCircle className="w-4 h-4" />
-                          Reject
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <p className="text-slate-500 text-center py-4">No requests yet.</p>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Sidebar */}
-      <div className="space-y-8">
-        {/* Owner Info */}
-        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm text-center">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Project Owner</h3>
-          <button 
-            onClick={() => owner && navigate('profile', owner.id)}
-            className="group block w-full text-center"
-          >
-            <img 
-              src={owner?.profileImage || DEFAULT_AVATAR} 
-              alt={owner?.name} 
-              className="w-20 h-20 rounded-full mx-auto mb-4 border-2 border-indigo-100 group-hover:border-indigo-600 transition-all bg-white"
-              referrerPolicy="no-referrer"
-            />
-            <h4 className="text-lg font-bold text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors">{owner?.name || 'Loading...'}</h4>
-          </button>
-          {projectOwnerId && project.userRoles?.[projectOwnerId] && (
-            <div className="mb-2">
-              <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold uppercase">
-                {project.userRoles[projectOwnerId]}
-              </span>
-            </div>
-          )}
-          <p className="text-slate-500 text-sm mb-4 line-clamp-2">{owner?.bio}</p>
-          <div className="flex justify-center gap-3">
-            {owner?.githubLink && <a href={owner.githubLink} target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-50 rounded-full text-slate-600 hover:text-indigo-600 transition-colors"><Github className="w-5 h-5" /></a>}
-            {owner?.linkedinLink && <a href={owner.linkedinLink} target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-50 rounded-full text-slate-600 hover:text-indigo-600 transition-colors"><Linkedin className="w-5 h-5" /></a>}
-          </div>
-        </div>
+      {actionError && <div className="mt-4"><ErrorText>{actionError}</ErrorText></div>}
 
-        {/* Project Team */}
-        {project.acceptedUsers && project.acceptedUsers.length > 0 && (
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Project Team</h3>
-            <div className="space-y-4">
-              {project.acceptedUsers.map((u: any) => {
-                const uid = getId(u);
-                const name = typeof u === 'string' ? 'User' : u?.name || 'User';
-                const profileImage = typeof u === 'string' ? null : u?.profileImage;
-
+      <div className="mt-6 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-3 items-start">
+        {/* Main column; waiting requests move above the long description */}
+        <div className="flex flex-col gap-3 min-w-0">
+          <section className={cardStyles}>
+            <div role="tablist" aria-label="Project sections" className="flex gap-6 px-5 border-b border-line overflow-x-auto">
+              {tabs.map(tab => {
+                const active = activeTab === tab.id;
                 return (
-                  <div key={uid} className="flex items-center justify-between">
-                    <button 
-                      onClick={() => navigate('profile', uid)}
-                      className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left group"
-                    >
-                      <img 
-                        src={profileImage || DEFAULT_AVATAR} 
-                        className="w-10 h-10 rounded-full border border-slate-200 bg-white"
-                        referrerPolicy="no-referrer"
+                  <button
+                    key={tab.id}
+                    role="tab"
+                    type="button"
+                    aria-selected={active}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={cx(
+                      'relative h-11 flex items-center gap-2 text-sm whitespace-nowrap transition-colors',
+                      active ? 'text-ink font-medium' : 'text-muted hover:text-ink'
+                    )}
+                  >
+                    {tab.label}
+                    {tab.id === 'chat' && (
+                      <span
+                        title={socketStatus === 'connected' ? 'Live' : socketStatus === 'connecting' ? 'Connecting' : 'Offline, refreshing every few seconds'}
+                        className={cx('w-1.5 h-1.5 rounded-full', socketStatus === 'connected' ? 'bg-positive' : socketStatus === 'connecting' ? 'bg-warn-ink' : 'bg-control')}
                       />
-                      <div>
-                        <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{name}</p>
-                        <p className="text-xs text-slate-500">{(uid && project.userRoles?.[uid]) || 'Collaborator'}</p>
-                      </div>
-                    </button>
-                  </div>
+                    )}
+                    {active && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-ink" />}
+                  </button>
                 );
               })}
             </div>
-          </div>
-        )}
 
-        {/* Action Card */}
-        <div className="bg-indigo-600 rounded-3xl p-6 text-white shadow-lg shadow-indigo-100">
-          {!user ? (
-            <div className="text-center space-y-4">
-              <p className="font-medium">Sign in to collaborate on this project.</p>
-              <button onClick={() => navigate('home')} className="w-full bg-white text-indigo-600 py-3 rounded-xl font-bold hover:bg-indigo-50 transition-colors">
-                Sign In
-              </button>
-            </div>
-          ) : isOwner ? (
-            <div className="text-center space-y-4">
-              <p className="font-medium">You are the owner of this project.</p>
-              <button onClick={() => navigate('create', projectId)} className="w-full bg-indigo-500 text-white py-3 rounded-xl font-bold hover:bg-indigo-400 transition-colors">
-                Edit Project
-              </button>
-            </div>
-          ) : isAccepted ? (
-            <div className="text-center space-y-4">
-              <div className="bg-white/20 w-12 h-12 rounded-full flex items-center justify-center mx-auto">
-                <CheckCircle className="w-6 h-6" />
+            {activeTab === 'details' && (
+              <div role="tabpanel" className="p-5 lg:p-6">
+                <div className="md">
+                  <Markdown>{project.description}</Markdown>
+                </div>
+
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 mt-8 border-b border-rule">
+                  {details.map(([label, value]) => (
+                    <div key={label} className="flex items-baseline justify-between gap-4 py-2.5 border-t border-rule">
+                      <dt className="text-muted flex-none">{label}</dt>
+                      <dd className={cx('text-right min-w-0', !value && 'text-muted')}>{value || '—'}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
-              <p className="font-bold text-xl">You're in!</p>
-              <p className="text-indigo-100 text-sm">You are an accepted collaborator for this project.</p>
-            </div>
-          ) : existingRequest && existingRequest.status !== 'Rejected' ? (
-            <div className="text-center space-y-4">
-              <div className="bg-white/20 w-12 h-12 rounded-full flex items-center justify-center mx-auto">
-                <Clock className="w-6 h-6" />
+            )}
+
+            {activeTab === 'chat' && (
+              <div role="tabpanel">
+                <div ref={messagesEndRef} className="max-h-[440px] min-h-32 overflow-y-auto px-5 py-4">
+                  {messages.length > 0 ? (
+                    <ul className="space-y-4">
+                      {messages.map((msg, index) => {
+                        const isMe = getId(msg.senderId) === user?.id;
+                        const senderName = msg.senderId?.name || (isMe ? user?.name : 'Teammate');
+                        return (
+                          <li key={getId(msg) || index} className="flex items-start gap-3">
+                            <Avatar name={senderName} src={msg.senderId?.profileImage} size={28} />
+                            <div className="min-w-0">
+                              <div className="flex items-baseline gap-2">
+                                <span className="font-medium">{isMe ? 'You' : senderName}</span>
+                                <span className="text-xs text-muted">
+                                  {msg.createdAt ? `${formatDistanceToNow(new Date(msg.createdAt))} ago` : ''}
+                                </span>
+                              </div>
+                              <p className="mt-0.5 whitespace-pre-wrap break-words">{msg.text}</p>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="text-muted">No messages yet. Say hello to the team.</p>
+                  )}
+                </div>
+
+                <form
+                  onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
+                  className="flex gap-2 p-3 border-t border-line"
+                >
+                  <label className="sr-only" htmlFor="chat-input">Message the team</label>
+                  <input
+                    id="chat-input"
+                    type="text"
+                    value={newMessageText}
+                    onChange={(e) => setNewMessageText(e.target.value)}
+                    maxLength={2000}
+                    placeholder="Message the team"
+                    className={inputStyles}
+                    autoComplete="off"
+                  />
+                  <Button type="submit" variant="primary" className="h-10" disabled={!newMessageText.trim()}>
+                    <Send className="w-4 h-4" strokeWidth={1.5} />
+                    Send
+                  </Button>
+                </form>
+                {chatError && <div className="px-5 pb-3"><ErrorText>{chatError}</ErrorText></div>}
               </div>
-              <p className="font-bold">Request {existingRequest.status}</p>
-              <p className="text-indigo-100 text-sm">Your application is currently being reviewed by the owner.</p>
-            </div>
-          ) : project.status === 'Closed' || project.status === 'Completed' ? (
-            <div className="text-center space-y-2">
-              <p className="font-bold">This project is {project.status.toLowerCase()}.</p>
-              <p className="text-indigo-100 text-sm">It is not accepting new collaborators right now.</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <h3 className="text-lg font-bold">Interested in joining?</h3>
-              {existingRequest?.status === 'Rejected' && (
-                <p className="text-indigo-100 text-sm">Your previous request was declined. You can send a new one.</p>
+            )}
+
+            {activeTab === 'milestones' && (
+              <div role="tabpanel" className="p-5 lg:p-6">
+                {(isOwner || isAccepted) && (
+                  <form onSubmit={handleCreateLog} className="pb-6 mb-2 border-b border-line">
+                    <div className="flex items-center justify-between gap-3">
+                      <h2 className="text-base font-medium">Log progress</h2>
+                      <div role="group" aria-label="Entry type" className="inline-flex h-8 p-0.5 bg-raised rounded-md">
+                        {(['Milestone', 'Task'] as const).map((type) => (
+                          <button
+                            key={type}
+                            type="button"
+                            aria-pressed={logType === type}
+                            onClick={() => setLogType(type)}
+                            className={cx(
+                              'h-7 px-3 rounded-[5px] text-sm transition-colors',
+                              logType === type ? 'bg-surface text-ink font-medium' : 'text-muted hover:text-ink'
+                            )}
+                          >
+                            {type}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                      <div>
+                        <label htmlFor="log-title" className={labelStyles}>What was done</label>
+                        <input
+                          id="log-title"
+                          required
+                          type="text"
+                          value={logTitle}
+                          onChange={(e) => setLogTitle(e.target.value)}
+                          placeholder="Matching API returns ride groups"
+                          className={inputStyles}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="log-details" className={labelStyles}>Details <span className="text-muted font-normal">(optional)</span></label>
+                        <input
+                          id="log-details"
+                          type="text"
+                          value={logDetails}
+                          onChange={(e) => setLogDetails(e.target.value)}
+                          maxLength={2000}
+                          className={inputStyles}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-3 mt-4">
+                      {logError && <ErrorText>{logError}</ErrorText>}
+                      <Button type="submit" variant="primary">Save {logType.toLowerCase()}</Button>
+                    </div>
+                  </form>
+                )}
+
+                <h2 className="text-base font-medium mt-4">History</h2>
+                {logsLoading ? (
+                  <div className="mt-3 space-y-3" aria-busy="true">
+                    {[0, 1, 2].map(i => <div key={i} className="h-10 bg-raised rounded" />)}
+                  </div>
+                ) : projectLogs.length > 0 ? (
+                  <ul className="mt-2">
+                    {projectLogs.map((log, index) => {
+                      const logName = log.userId?.name || 'Teammate';
+                      return (
+                        <li key={getId(log) || index} className="grid grid-cols-[72px_minmax(0,1fr)] gap-4 py-3 border-t border-rule first:border-t-0">
+                          <span className="num text-muted text-sm pt-px">{format(new Date(log.createdAt), 'd MMM')}</span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">{log.title || `${logName} joined the project`}</span>
+                              <Pill>{log.contributionType}</Pill>
+                            </div>
+                            {log.details && <p className="text-muted mt-1 whitespace-pre-wrap">{log.details}</p>}
+                            <div className="flex items-center gap-2 mt-2 text-sm text-muted">
+                              <Avatar name={logName} src={log.userId?.profileImage} size={20} />
+                              {logName}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-muted mt-2">Nothing logged yet. Milestones and finished tasks show up here.</p>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* Requests to join, for the owner */}
+          {isOwner && (
+            <section id="requests" className={cx(cardStyles, pendingCount > 0 && 'order-first')}>
+              <div className="flex items-baseline justify-between gap-3 px-5 pt-5">
+                <h2 className="text-base font-medium">Requests to join</h2>
+                <span className="text-sm text-muted num">{pendingCount === 0 ? 'None waiting' : `${pendingCount} waiting`}</span>
+              </div>
+              {requests.length > 0 ? (
+                <ul className="mt-3">
+                  {requests.map(req => {
+                    const reqUserId = getId(req.userId);
+                    const person = typeof req.userId === 'string' ? null : req.userId;
+                    return (
+                      <li key={req.id} className="grid grid-cols-[32px_minmax(0,1fr)] sm:grid-cols-[32px_minmax(0,1fr)_168px] gap-x-3 px-5 py-4 border-t border-rule">
+                        <Avatar name={person?.name} src={person?.profileImage} size={32} />
+                        <div className="flex-1 min-w-0">
+                          <a
+                            href={`/profile/${reqUserId}`}
+                            onClick={(e) => { e.preventDefault(); navigate('profile', reqUserId); }}
+                            className="font-medium hover:underline underline-offset-2"
+                          >
+                            {person?.name || 'Deleted user'}
+                          </a>
+                          {person?.skills?.length > 0 && (
+                            <p className="text-sm text-muted truncate">{person.skills.slice(0, 4).join(', ')}</p>
+                          )}
+                          {req.message && <p className="mt-1.5 whitespace-pre-wrap break-words">{req.message}</p>}
+                          <p className="text-xs text-muted mt-1.5">{formatDistanceToNow(new Date(req.createdAt))} ago</p>
+                        </div>
+                        <div className="col-start-2 sm:col-start-3 sm:row-start-1 flex items-center gap-2 mt-3 sm:mt-0 sm:justify-end">
+                          {req.status === 'Pending' ? (
+                            <>
+                              <button type="button" onClick={() => handleRequestAction(req, 'Rejected')} className={buttonStyles.ghost}>Decline</button>
+                              <button type="button" onClick={() => handleRequestAction(req, 'Accepted')} className={cx(buttonStyles.ghost, 'border border-control hover:border-ink hover:bg-surface')}>Accept</button>
+                            </>
+                          ) : (
+                            <Pill tone={requestStatusTone(req.status)}>{req.status === 'Rejected' ? 'Declined' : req.status}</Pill>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="px-5 pt-2 pb-5 text-muted">No requests yet. They show up here when someone asks to join.</p>
               )}
-              <textarea 
-                placeholder="Tell the owner why you're a good fit..."
-                value={requestMessage}
-                onChange={(e) => setRequestMessage(e.target.value)}
-                maxLength={1000}
-                className="w-full bg-indigo-700/50 border border-indigo-400/30 rounded-xl p-3 text-sm placeholder:text-indigo-300 outline-none focus:ring-2 focus:ring-white/50 min-h-[100px]"
-              />
-              <button 
-                onClick={handleApply}
-                disabled={isSubmitting || !requestMessage.trim()}
-                className="w-full bg-white text-indigo-600 py-3 rounded-xl font-bold hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                <Send className="w-4 h-4" />
-                {isSubmitting ? 'Sending...' : 'Request to Collaborate'}
-              </button>
-            </div>
+            </section>
           )}
         </div>
+
+        {/* Right rail */}
+        {/* On a phone the team and the join form come before the long description, except for the owner, whose requests lead */}
+        <aside className={cx('space-y-3 min-w-0', !isOwner && 'order-first lg:order-none')}>
+          {/* The team sheet: who is on it, which roles are still open */}
+          <section className={cx(cardStyles, 'p-5')}>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-medium">Team</h2>
+              <SeatStrip filled={teamSize(project)} open={open.length} />
+            </div>
+            <p className="text-sm text-muted mt-1">{seatSummary(teamSize(project), open.length)}</p>
+
+            <ul className="mt-4 space-y-3">
+              {owner && (
+                <li className="flex items-start gap-3">
+                  <a href={`/profile/${owner.id}`} onClick={(e) => { e.preventDefault(); navigate('profile', owner.id); }} className="flex items-start gap-3 min-w-0 flex-1 group">
+                    <Avatar name={owner.name} src={owner.profileImage} size={32} />
+                    <span className="min-w-0">
+                      <span className="block font-medium group-hover:underline underline-offset-2">{owner.name}</span>
+                      <span className="block text-sm text-muted">Owner{project.userRoles?.[owner.id] ? ` · ${project.userRoles[owner.id]}` : ''}</span>
+                    </span>
+                  </a>
+                  <span className="flex items-center gap-1 pt-1">
+                    {owner.githubLink && <a href={owner.githubLink} target="_blank" rel="noopener noreferrer" aria-label={`${owner.name} on GitHub`} className="p-1 text-muted hover:text-ink"><Github className="w-4 h-4" strokeWidth={1.5} /></a>}
+                    {owner.linkedinLink && <a href={owner.linkedinLink} target="_blank" rel="noopener noreferrer" aria-label={`${owner.name} on LinkedIn`} className="p-1 text-muted hover:text-ink"><Linkedin className="w-4 h-4" strokeWidth={1.5} /></a>}
+                  </span>
+                </li>
+              )}
+              {members.map((u: any) => {
+                const uid = getId(u);
+                const name = typeof u === 'string' ? 'Member' : u?.name || 'Member';
+                return (
+                  <li key={uid}>
+                    <a href={`/profile/${uid}`} onClick={(e) => { e.preventDefault(); navigate('profile', uid); }} className="flex items-start gap-3 group">
+                      <Avatar name={name} src={typeof u === 'string' ? null : u?.profileImage} size={32} />
+                      <span className="min-w-0">
+                        <span className="block font-medium group-hover:underline underline-offset-2">{name}</span>
+                        <span className="block text-sm text-muted">{(uid && project.userRoles?.[uid]) || 'Role not set'}</span>
+                      </span>
+                    </a>
+                  </li>
+                );
+              })}
+              {open.map(role => (
+                <li key={role} className="flex items-start gap-3">
+                  <span aria-hidden="true" className="w-8 h-8 flex-none rounded-full border-[1.5px] border-dashed border-data" />
+                  <span className="min-w-0">
+                    <span className="block font-medium">{role}</span>
+                    <span className="block text-sm text-data">Open</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {owner?.bio && <p className="text-sm text-muted mt-4 pt-4 border-t border-rule">{owner.bio}</p>}
+          </section>
+
+          {/* Joining */}
+          {!isOwner && (
+            <section className={cx(cardStyles, 'p-5')}>
+              {!user ? (
+                <>
+                  <h2 className="text-base font-medium">Join this team</h2>
+                  <p className="text-muted mt-1">Sign in to ask {ownerFirstName} for a place.</p>
+                </>
+              ) : isAccepted ? (
+                <>
+                  <h2 className="text-base font-medium">You're on this team</h2>
+                  <p className="text-muted mt-1">Your role: {project.userRoles?.[user.id] || 'not set yet. Set it from your profile.'}</p>
+                  <Button className="mt-4" onClick={() => setActiveTab('chat')}>Open team chat</Button>
+                </>
+              ) : existingRequest && existingRequest.status !== 'Rejected' ? (
+                <>
+                  <h2 className="text-base font-medium">Request sent</h2>
+                  <p className="text-muted mt-1">
+                    You asked to join {existingRequest.createdAt ? formatDistanceToNow(new Date(existingRequest.createdAt)) + ' ago' : 'recently'}. {ownerFirstName} hasn't answered yet.
+                  </p>
+                </>
+              ) : !isRecruiting(project) ? (
+                <>
+                  <h2 className="text-base font-medium">Not taking requests</h2>
+                  <p className="text-muted mt-1">This project is {project.status.toLowerCase()}.</p>
+                </>
+              ) : (
+                <form onSubmit={(e) => { e.preventDefault(); handleApply(); }}>
+                  <h2 className="text-base font-medium">Ask to join</h2>
+                  {existingRequest?.status === 'Rejected' && (
+                    <p className="text-sm text-muted mt-1">Your last request was declined. You can send a new one.</p>
+                  )}
+                  <label htmlFor="join-message" className={cx(labelStyles, 'mt-4')}>Message to {ownerFirstName}</label>
+                  <textarea
+                    id="join-message"
+                    value={requestMessage}
+                    onChange={(e) => setRequestMessage(e.target.value)}
+                    maxLength={1000}
+                    rows={4}
+                    placeholder={open.length ? `Which role you'd take (${open[0]}?) and what you've built before` : 'What you would work on and what you have built before'}
+                    className={cx(inputStyles, 'h-auto py-2 leading-5 resize-y')}
+                  />
+                  <Button type="submit" variant="primary" className="w-full mt-3" disabled={isSubmitting || !requestMessage.trim()}>
+                    {isSubmitting ? 'Sending…' : 'Send request'}
+                  </Button>
+                </form>
+              )}
+            </section>
+          )}
+        </aside>
       </div>
     </div>
   );

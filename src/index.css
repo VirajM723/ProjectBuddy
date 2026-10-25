@@ -1,1 +1,132 @@
 @import "tailwindcss";
+
+/* Achromatic ledger: the chrome stays ink, the one data hue marks open seats and activity */
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+
+  --color-ground: #f8f8f8;
+  --color-surface: #ffffff;
+  --color-raised: #eeeeee;
+  --color-line: #e6e6e6;
+  --color-rule: #f0f0f0;
+  --color-control: #d4d4d4;
+  --color-ink: #0a0a0a;
+  --color-muted: #6b6b6b;
+  --color-primary: #141414;
+  --color-primary-hover: #333333;
+
+  /* The one data hue and its steps for the heatmap */
+  --color-data: #1d5fbf;
+  --color-data-1: #d3e0f3;
+  --color-data-2: #94b4e3;
+  --color-data-3: #5585cf;
+
+  --color-positive: #2e7d32;
+  --color-negative: #c4242a;
+  --color-pos-bg: #dcfae5;
+  --color-pos-ink: #04250e;
+  --color-neg-bg: #ffedea;
+  --color-neg-ink: #831c1e;
+  --color-warn-bg: #fffbeb;
+  --color-warn-line: #fde68a;
+  --color-warn-ink: #92400e;
+  --color-neutral-bg: #eeeeee;
+  --color-neutral-ink: #3d3d3d;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-data-1);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-muted);
+  }
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rendered project descriptions */
+.md {
+  font-size: 15px;
+  line-height: 24px;
+  max-width: 68ch;
+}
+.md > * + * {
+  margin-top: 12px;
+}
+.md h1,
+.md h2,
+.md h3 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  margin-top: 24px;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md ul {
+  list-style: disc;
+  padding-left: 20px;
+}
+.md ol {
+  list-style: decimal;
+  padding-left: 20px;
+}
+.md li + li {
+  margin-top: 4px;
+}
+.md a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--color-raised);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.md pre {
+  background: var(--color-raised);
+  padding: 12px 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+}
+.md blockquote {
+  border-left: 2px solid var(--color-line);
+  padding-left: 12px;
+  color: var(--color-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

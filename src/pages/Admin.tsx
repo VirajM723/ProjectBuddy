@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Project, UserProfile } from '../types';
 import { useAuth } from '../App';
-import { ShieldAlert, Trash2, User as UserIcon, Layout } from 'lucide-react';
+import { format } from 'date-fns';
 import { adminService, getId, getErrorMessage } from '../services/api';
+import { Avatar, Pill, buttonStyles, cardStyles, cx, projectStatusTone } from '../components/ui';
 
 export function Admin() {
   const { user } = useAuth();
@@ -59,78 +60,100 @@ export function Admin() {
 
   if (user?.role !== 'admin') {
     return (
-      <div className="text-center py-20 space-y-4">
-        <ShieldAlert className="w-16 h-16 text-red-500 mx-auto" />
-        <h1 className="text-2xl font-bold">Access Denied</h1>
-        <p className="text-slate-500">You must be an administrator to view this page.</p>
+      <div>
+        <h1 className="text-2xl font-medium">Admin</h1>
+        <p className="text-muted mt-1">Only administrators can open this page.</p>
       </div>
     );
   }
 
+  const admins = users.filter(u => u.role === 'admin').length;
+  const openCount = projects.filter(p => p.status === 'Open' || p.status === 'Reopened').length;
+  const headCell = 'h-10 px-5 text-left text-xs font-normal text-muted';
+  const rowCell = 'px-5 py-3 border-t border-rule align-middle';
+
   return (
-    <div className="space-y-8">
-      <div className="flex items-center gap-4 mb-8">
-        <div className="bg-red-600 p-3 rounded-2xl text-white">
-          <ShieldAlert className="w-8 h-8" />
-        </div>
-        <div>
-          <h1 className="text-3xl font-extrabold text-slate-900">Admin Control Panel</h1>
-          <p className="text-slate-500">Manage users, projects, and platform health.</p>
-        </div>
-      </div>
+    <div>
+      <h1 className="text-2xl font-medium tracking-[-0.01em]">Admin</h1>
+      <p className="text-muted mt-1 num">
+        {loading ? '\u00a0' : `${users.length} members, ${admins} with admin access · ${projects.length} projects, ${openCount} open`}
+      </p>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-        {/* Users Management */}
-        <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-          <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-            <UserIcon className="w-6 h-6 text-indigo-600" />
-            Users ({users.length})
-          </h3>
-          <div className="space-y-4 overflow-y-auto max-h-[600px] pr-2">
-            {users.map(u => (
-              <div key={u.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <div className="flex items-center gap-3">
-                  <img src={u.profileImage || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>'} className="w-10 h-10 rounded-full bg-white" referrerPolicy="no-referrer" />
-                  <div>
-                    <div className="font-bold text-slate-900">{u.name}</div>
-                    <div className="text-xs text-slate-500">{u.email}</div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${u.role === 'admin' ? 'bg-red-50 text-red-600' : 'bg-slate-200 text-slate-600'}`}>
-                    {u.role}
-                  </span>
-                  <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-slate-400 hover:text-red-600 transition-colors">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-6 items-start">
+        <section className={cx(cardStyles, 'overflow-hidden')}>
+          <h2 className="text-base font-medium px-5 pt-5 pb-3">Members</h2>
+          <div className="max-h-[600px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-surface">
+                <tr>
+                  <th className={headCell}>Name</th>
+                  <th className={cx(headCell, 'hidden sm:table-cell')}>Joined</th>
+                  <th className={headCell}>Access</th>
+                  <th className={headCell}><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={4} className={cx(rowCell, 'text-muted')}>Loading members…</td></tr>
+                ) : users.map(u => (
+                  <tr key={u.id}>
+                    <td className={cx(rowCell, 'max-w-0 w-full')}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Avatar name={u.name} src={u.profileImage} size={28} />
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{u.name}</div>
+                          <div className="text-[13px] text-muted truncate">{u.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className={cx(rowCell, 'hidden sm:table-cell num text-muted whitespace-nowrap')}>{u.createdAt ? format(new Date(u.createdAt), 'yyyy-MM-dd') : '—'}</td>
+                    <td className={rowCell}><Pill>{u.role === 'admin' ? 'Admin' : 'Member'}</Pill></td>
+                    <td className={cx(rowCell, 'text-right')}>
+                      {u.id !== user?.id && (
+                        <button type="button" onClick={() => handleDeleteUser(u.id)} className={cx(buttonStyles.ghost, 'h-8 px-3 text-muted hover:text-negative hover:bg-neg-bg')}>Delete</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        </section>
 
-        {/* Projects Management */}
-        <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-          <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-            <Layout className="w-6 h-6 text-indigo-600" />
-            Projects ({projects.length})
-          </h3>
-          <div className="space-y-4 overflow-y-auto max-h-[600px] pr-2">
-            {projects.map(p => (
-              <div key={p.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <div>
-                  <div className="font-bold text-slate-900">{p.title}</div>
-                  <div className="text-xs text-slate-500">Status: {p.status}{p.ownerId?.name ? ` · by ${p.ownerId.name}` : ''}</div>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => handleDeleteProject(p.id)} className="p-2 text-slate-400 hover:text-red-600 transition-colors">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
+        <section className={cx(cardStyles, 'overflow-hidden')}>
+          <h2 className="text-base font-medium px-5 pt-5 pb-3">Projects</h2>
+          <div className="max-h-[600px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-surface">
+                <tr>
+                  <th className={headCell}>Project</th>
+                  <th className={cx(headCell, 'hidden sm:table-cell')}>Posted</th>
+                  <th className={headCell}>Status</th>
+                  <th className={headCell}><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={4} className={cx(rowCell, 'text-muted')}>Loading projects…</td></tr>
+                ) : projects.length === 0 ? (
+                  <tr><td colSpan={4} className={cx(rowCell, 'text-muted')}>No projects have been posted.</td></tr>
+                ) : projects.map(p => (
+                  <tr key={p.id}>
+                    <td className={cx(rowCell, 'max-w-0 w-full')}>
+                      <div className="font-medium truncate">{p.title}</div>
+                      <div className="text-[13px] text-muted truncate">{p.ownerId?.name ? `by ${p.ownerId.name}` : 'Owner deleted'}</div>
+                    </td>
+                    <td className={cx(rowCell, 'hidden sm:table-cell num text-muted whitespace-nowrap')}>{format(new Date(p.createdAt), 'yyyy-MM-dd')}</td>
+                    <td className={rowCell}><Pill tone={projectStatusTone(p.status)}>{p.status}</Pill></td>
+                    <td className={cx(rowCell, 'text-right')}>
+                      <button type="button" onClick={() => handleDeleteProject(p.id)} className={cx(buttonStyles.ghost, 'h-8 px-3 text-muted hover:text-negative hover:bg-neg-bg')}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

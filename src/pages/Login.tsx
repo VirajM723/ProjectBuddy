@@ -1,6 +1,9 @@
-import { useState } from 'react';
-import { Layout, LogIn, UserPlus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { formatDistanceToNowStrict } from 'date-fns';
 import { useAuth } from '../App';
+import { Project } from '../types';
+import { projectService } from '../services/api';
+import { Button, ErrorText, Mark, SeatStrip, cardStyles, cx, inputStyles, labelStyles, openRoles, teamSize } from '../components/ui';
 
 export function Login() {
   const { signIn, register, signingIn } = useAuth();
@@ -11,6 +14,14 @@ export function Login() {
     password: '',
   });
   const [error, setError] = useState('');
+  const [recruiting, setRecruiting] = useState<Project[]>([]);
+
+  // The project list is public, so the sign-in screen can show who is looking for people right now
+  useEffect(() => {
+    projectService.getAll()
+      .then((all: Project[]) => setRecruiting(all.filter(p => openRoles(p).length > 0).slice(0, 4)))
+      .catch(() => setRecruiting([]));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,87 +38,100 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-8 bg-white p-10 rounded-3xl border border-slate-200 shadow-xl text-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="bg-indigo-600 p-4 rounded-3xl text-white shadow-lg shadow-indigo-100">
-            <Layout className="w-12 h-12" />
-          </div>
-          <div>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tight">Project Buddy</h1>
-            <p className="text-slate-500 mt-2 font-medium">Build something amazing together.</p>
-          </div>
-        </div>
+    <div className="min-h-screen bg-ground flex flex-col px-4">
+      <div className={cx('flex items-center gap-2 h-14 w-full mx-auto font-medium', recruiting.length ? 'max-w-[400px] lg:max-w-[960px]' : 'max-w-[400px]')}>
+        <Mark size={24} />
+        Project Buddy
+      </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 text-left">
-          {isRegister && (
+      <main className="flex-1 flex flex-col lg:flex-row items-center lg:items-center justify-center gap-12 lg:gap-20 py-8">
+        <div className="w-full max-w-[400px] self-center">
+          <h1 className="text-2xl font-medium tracking-[-0.01em]">{isRegister ? 'Create your account' : 'Sign in'}</h1>
+          <p className="text-muted mt-1">Post a side project, find people to build it with, and keep the team's chat and progress in one place.</p>
+
+          <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+            {isRegister && (
+              <div>
+                <label htmlFor="auth-name" className={labelStyles}>Full name</label>
+                <input
+                  id="auth-name"
+                  type="text"
+                  required
+                  autoComplete="name"
+                  className={inputStyles}
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
+            )}
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Full Name</label>
+              <label htmlFor="auth-email" className={labelStyles}>Email</label>
               <input
-                type="text"
+                id="auth-email"
+                type="email"
                 required
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                autoComplete="email"
+                className={inputStyles}
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               />
             </div>
-          )}
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Email Address</label>
-            <input
-              type="email"
-              required
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Password</label>
-            <input
-              type="password"
-              required
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-            />
-          </div>
+            <div>
+              <label htmlFor="auth-password" className={labelStyles}>Password</label>
+              <input
+                id="auth-password"
+                type="password"
+                required
+                autoComplete={isRegister ? 'new-password' : 'current-password'}
+                className={inputStyles}
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              />
+            </div>
 
-          {error && <p className="text-red-500 text-sm font-medium">{error}</p>}
+            {error && <ErrorText>{error}</ErrorText>}
 
-          <button
-            type="submit"
-            disabled={signingIn}
-            className="w-full flex items-center justify-center gap-3 bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 group disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {signingIn ? (
-              <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
-            ) : isRegister ? (
-              <UserPlus className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
-            ) : (
-              <LogIn className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
-            )}
-            {signingIn ? 'Processing...' : isRegister ? 'Create Account' : 'Sign In'}
-          </button>
-        </form>
+            <Button type="submit" variant="primary" className="w-full h-10" disabled={signingIn}>
+              {signingIn ? (isRegister ? 'Creating account…' : 'Signing in…') : isRegister ? 'Create account' : 'Sign in'}
+            </Button>
+          </form>
 
-        <div className="pt-4">
-          <button
-            onClick={() => setIsRegister(!isRegister)}
-            className="text-indigo-600 font-bold hover:text-indigo-700 transition-colors"
-          >
-            {isRegister ? 'Already have an account? Sign In' : "Don't have an account? Register"}
-          </button>
+          <p className="mt-6 text-sm text-muted">
+            {isRegister ? 'Already have an account?' : 'New to Project Buddy?'}{' '}
+            <button
+              type="button"
+              onClick={() => { setIsRegister(!isRegister); setError(''); }}
+              className="text-ink font-medium underline underline-offset-2"
+            >
+              {isRegister ? 'Sign in' : 'Create an account'}
+            </button>
+          </p>
         </div>
 
-        <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">
-          Secure authentication via MERN Backend
-        </p>
-      </div>
-      
-      <div className="mt-8 text-slate-400 text-sm font-medium">
-        © 2026 Project Buddy • Built for Creators
-      </div>
+        {recruiting.length > 0 && (
+          <section aria-labelledby="recruiting-title" className="w-full max-w-[400px] lg:max-w-[480px]">
+            <h2 id="recruiting-title" className="text-base font-medium">Looking for people now</h2>
+            <ul className={cx(cardStyles, 'mt-3')}>
+              {recruiting.map(project => {
+                const open = openRoles(project);
+                return (
+                  <li key={project.id} className="px-4 py-3 border-t border-rule first:border-t-0">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="font-medium truncate">{project.title}</span>
+                      <span className="text-xs text-muted whitespace-nowrap num">{formatDistanceToNowStrict(new Date(project.createdAt))} ago</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5 text-sm min-w-0">
+                      <SeatStrip filled={teamSize(project)} open={open.length} />
+                      <span className="truncate"><span className="text-data font-medium">{open.length} open</span><span className="text-muted"> · {open.join(', ')}</span></span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="text-sm text-muted mt-3">Sign in to read the details and ask to join.</p>
+          </section>
+        )}
+      </main>
     </div>
   );
 }

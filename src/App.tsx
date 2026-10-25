@@ -7,7 +7,6 @@ import { CreateProject } from './pages/CreateProject';
 import { Admin } from './pages/Admin';
 import { ProjectDetails } from './pages/ProjectDetails';
 import { Login } from './pages/Login';
-import { motion, AnimatePresence } from 'motion/react';
 import { authService, userService } from './services/api';
 
 interface AuthContextType {
@@ -175,8 +174,8 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600"></div>
+      <div className="min-h-screen flex items-center justify-center bg-ground text-sm text-muted" role="status">
+        Loading Project Buddy…
       </div>
     );
   }
@@ -191,26 +190,19 @@ export default function App() {
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, signingIn, signIn, register, logout, updateProfileState }}>
-      <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      <div className="min-h-screen bg-ground text-ink">
         <Navbar navigate={navigate} currentPage={currentPage} />
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentPage + (currentPage === 'project' ? selectedProjectId || '' : '') + (currentPage === 'profile' ? profileId || '' : '') + (currentPage === 'create' ? editProjectId || '' : '')}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
-              {currentPage === 'home' && <Home navigate={navigate} />}
-              {currentPage === 'profile' && <Profile userId={profileId || user.id} navigate={navigate} />}
-              {currentPage === 'create' && <CreateProject navigate={navigate} projectId={editProjectId || undefined} />}
-              {currentPage === 'admin' && <Admin />}
-              {currentPage === 'project' && selectedProjectId && (
-                <ProjectDetails projectId={selectedProjectId} navigate={navigate} />
-              )}
-            </motion.div>
-          </AnimatePresence>
+        <main className="md:pl-14">
+          {/* One centred canvas: 1200px wide at most, 32px gutters on desktop, 16px on a phone */}
+          <div className="max-w-[1264px] mx-auto px-4 md:px-8 pt-5 md:pt-9 pb-24 md:pb-16">
+            {currentPage === 'home' && <Home navigate={navigate} />}
+            {currentPage === 'profile' && <Profile key={profileId || user.id} userId={profileId || user.id} navigate={navigate} />}
+            {currentPage === 'create' && <CreateProject key={editProjectId || 'new'} navigate={navigate} projectId={editProjectId || undefined} />}
+            {currentPage === 'admin' && <Admin />}
+            {currentPage === 'project' && selectedProjectId && (
+              <ProjectDetails key={selectedProjectId} projectId={selectedProjectId} navigate={navigate} />
+            )}
+          </div>
         </main>
       </div>
     </AuthContext.Provider>

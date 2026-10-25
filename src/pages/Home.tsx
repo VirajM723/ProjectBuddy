@@ -1,19 +1,28 @@
 import { useState, useEffect } from 'react';
 import { Project } from '../types';
-import { ProjectCard } from '../components/ProjectCard';
-import { Search, Filter, Rocket, Clock, MapPin, Compass, AlertCircle } from 'lucide-react';
+import { ProjectRow, projectGrid } from '../components/ProjectRow';
+import { Search, MapPin, Plus } from 'lucide-react';
 import { projectService } from '../services/api';
+import { Button, Notice, cardStyles, cx, isRecruiting, openRoles } from '../components/ui';
 
 interface HomeProps {
   navigate: (page: 'home' | 'profile' | 'create' | 'admin' | 'project', id?: string) => void;
 }
 
+type StatusFilter = 'All' | 'Open' | 'Ongoing' | 'Completed';
+const STATUS_FILTERS: StatusFilter[] = ['All', 'Open', 'Ongoing', 'Completed'];
+const isOpen = (p: Project) => p.status === 'Open' || p.status === 'Reopened';
+const matchesStatus = (p: Project, status: StatusFilter) =>
+  status === 'All' || (status === 'Open' ? isOpen(p) : p.status === status);
+
 export function Home({ navigate }: HomeProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'All' | 'Open' | 'Ongoing' | 'Completed'>('All');
-  
+  const [filterStatus, setFilterStatus] = useState<StatusFilter>('All');
+
   // Geolocation and H3 filtering states
   const [geoFilter, setGeoFilter] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -24,7 +33,7 @@ export function Home({ navigate }: HomeProps) {
     if (!geoFilter) {
       setGeoLoading(true);
       setGeoError(null);
-      
+
       if (!navigator.geolocation) {
         setGeoError('Geolocation is not supported by your browser.');
         setGeoLoading(false);
@@ -61,148 +70,162 @@ export function Home({ navigate }: HomeProps) {
   useEffect(() => {
     const fetchProjects = async () => {
       setLoading(true);
+      setLoadError(false);
       try {
         const data = await projectService.getAll(coords || undefined);
         setProjects(data);
       } catch (error) {
         console.error('Failed to fetch projects', error);
+        setLoadError(true);
       } finally {
         setLoading(false);
       }
     };
 
     fetchProjects();
-  }, [coords]);
+  }, [coords, reloadKey]);
 
-  const filteredProjects = projects.filter(p => {
-    const marchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          p.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          p.techStack.some(t => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                          p.requiredRoles.some(r => r.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesStatus = filterStatus === 'All' || p.status === filterStatus;
-    return marchesSearch && matchesStatus;
-  });
+  const term = searchTerm.trim().toLowerCase();
+  const searched = projects.filter(p =>
+    !term ||
+    p.title.toLowerCase().includes(term) ||
+    p.summary.toLowerCase().includes(term) ||
+    p.techStack.some(t => t.toLowerCase().includes(term)) ||
+    p.requiredRoles.some(r => r.toLowerCase().includes(term))
+  );
+  const filteredProjects = searched.filter(p => matchesStatus(p, filterStatus));
+
+  // The finding under the title: how many projects still need people, and for how many roles
+  const openProjects = projects.filter(isRecruiting);
+  const rolesOpen = openProjects.reduce((sum, p) => sum + openRoles(p).length, 0);
+  const summary = projects.length === 0
+    ? geoFilter ? 'No projects posted near you yet.' : 'No projects posted yet.'
+    : `${openProjects.length} of ${projects.length} projects looking for people · ${rolesOpen} ${rolesOpen === 1 ? 'role' : 'roles'} open${geoFilter ? ' near you' : ''}`;
 
   return (
-    <div className="space-y-8">
-      {/* Hero Section */}
-      <section className="bg-indigo-600 rounded-3xl p-8 sm:p-12 text-white relative overflow-hidden shadow-xl shadow-indigo-100">
-        <div className="relative z-10 max-w-2xl">
-          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-4">
-            Find your next <span className="text-indigo-200">collaboration</span> partner.
-          </h1>
-          <p className="text-indigo-100 text-lg mb-8 opacity-90">
-            Project Buddy is the marketplace for developers, designers, and creators to build together.
-          </p>
-          <div className="flex flex-wrap gap-4">
-            <button 
-              onClick={() => navigate('create')}
-              className="bg-white text-indigo-600 px-6 py-3 rounded-xl font-bold hover:bg-indigo-50 transition-colors shadow-lg"
-            >
-              Post a Project
-            </button>
-          </div>
+    <div>
+      {/* Title row */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-medium tracking-[-0.01em]">Projects</h1>
+          <p className="text-muted mt-1 num">{loading ? ' ' : summary}</p>
         </div>
-        <div className="absolute top-0 right-0 w-1/3 h-full opacity-10 pointer-events-none">
-          <Rocket className="w-full h-full transform translate-x-1/4 -translate-y-1/4 rotate-12" />
-        </div>
-      </section>
+        <Button variant="primary" onClick={() => navigate('create')}>
+          <Plus className="w-4 h-4" strokeWidth={2} />
+          Post a project
+        </Button>
+      </div>
 
-      {/* Search and Filter */}
-      <div className="space-y-4">
-        {geoError && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex items-start gap-3 text-sm animate-fade-in shadow-sm">
-            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <span className="font-semibold">Location Access Issue: </span>
-              {geoError}
-            </div>
-            <button 
-              onClick={() => setGeoError(null)} 
-              className="text-amber-500 hover:text-amber-700 text-xs font-bold leading-none"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
+      {/* Filters: search and status on the left, location on the right; on a phone search and location share a row */}
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <label className="relative block flex-1 min-w-0 lg:flex-none lg:w-80">
+          <span className="sr-only">Search projects</span>
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" strokeWidth={1.5} />
+          <input
+            type="search"
+            placeholder="Search by name, stack or role"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full h-9 pl-9 pr-3 bg-surface border border-control rounded-md text-sm outline-none focus:border-ink"
+          />
+        </label>
 
-        <div className="flex flex-col lg:flex-row gap-4 items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="relative w-full lg:max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-            <input 
-              type="text"
-              placeholder="Search projects, tech, or roles..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-            />
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-            {/* Geo Filter Button */}
-            <button
-              onClick={toggleGeoFilter}
-              disabled={geoLoading}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                geoFilter 
-                  ? 'bg-emerald-50 border-emerald-250 text-emerald-700 font-semibold shadow-sm' 
-                  : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {geoLoading ? (
-                <Compass className="w-4 h-4 text-emerald-500 animate-spin" />
-              ) : (
-                <MapPin className={`w-4 h-4 ${geoFilter ? 'text-emerald-600' : 'text-slate-400'}`} />
-              )}
-              {geoLoading ? 'Locating...' : geoFilter ? 'Proximity: Near Me' : 'Filter Near Me'}
-            </button>
+        <button
+          type="button"
+          onClick={toggleGeoFilter}
+          disabled={geoLoading}
+          aria-pressed={geoFilter}
+          className={cx(
+            'order-2 lg:order-3 lg:ml-auto flex flex-none items-center gap-1.5 h-9 px-3 rounded-md text-sm border bg-surface text-ink transition-colors',
+            geoFilter ? 'border-ink font-medium' : 'border-control hover:border-ink'
+          )}
+        >
+          <MapPin className="w-4 h-4" strokeWidth={1.5} />
+          {geoLoading ? 'Finding you…' : geoFilter ? 'Near me · on' : 'Near me'}
+        </button>
 
-            <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
-
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-              <Filter className="w-5 h-5 text-slate-400 mr-1 shrink-0" />
-              {['All', 'Open', 'Ongoing', 'Completed'].map((status) => (
+        <div className="order-3 lg:order-2 w-full lg:w-auto overflow-x-auto -mx-4 px-4 lg:mx-0 lg:px-0">
+          <div role="group" aria-label="Filter by status" className="inline-flex items-center h-9 p-0.5 bg-raised rounded-md">
+            {STATUS_FILTERS.map((status) => {
+              const count = searched.filter(p => matchesStatus(p, status)).length;
+              const active = filterStatus === status;
+              return (
                 <button
                   key={status}
-                  onClick={() => setFilterStatus(status as any)}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
-                    filterStatus === status 
-                      ? 'bg-indigo-600 text-white shadow-md' 
-                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                  }`}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setFilterStatus(status)}
+                  className={cx(
+                    'h-8 px-3 rounded-[5px] text-sm whitespace-nowrap transition-colors',
+                    active ? 'bg-surface text-ink font-medium' : 'text-muted hover:text-ink'
+                  )}
                 >
-                  {status}
+                  {status} <span className={cx('num', active ? 'text-muted' : '')}>{loading ? '' : count}</span>
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {/* Project Feed */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {geoError && (
+        <div className="mt-3">
+          <Notice onDismiss={() => setGeoError(null)}>{geoError}</Notice>
+        </div>
+      )}
+
+      {/* Project list */}
+      <section aria-label="Projects" className={cx(cardStyles, 'mt-4 overflow-hidden')}>
+        <div className={cx('hidden lg:grid px-5 h-10 items-center text-xs text-muted border-b border-line', projectGrid)}>
+          <span>Project</span>
+          <span>Team</span>
+          <span>Stack and time</span>
+          <span>Status</span>
+          <span className="text-right">Posted</span>
+        </div>
+
         {loading ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="bg-white border border-slate-200 rounded-xl p-6 animate-pulse h-64"></div>
-          ))
+          <ul aria-busy="true">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <li key={i} className={cx('px-4 lg:px-5 py-3.5 border-t border-rule first:border-t-0', projectGrid)}>
+                <div>
+                  <div className="h-4 w-56 max-w-full bg-raised rounded" />
+                  <div className="h-4 w-80 max-w-full bg-raised rounded mt-1" />
+                </div>
+                <div className="hidden lg:block h-4 w-32 bg-raised rounded" />
+                <div className="hidden lg:block h-4 w-36 bg-raised rounded" />
+                <div className="hidden lg:block h-5 w-14 bg-raised rounded" />
+                <div className="hidden lg:block h-4 w-20 bg-raised rounded ml-auto" />
+              </li>
+            ))}
+          </ul>
+        ) : loadError ? (
+          <div className="px-5 py-4 text-sm">
+            Couldn't load projects.{' '}
+            <button type="button" className="font-medium underline underline-offset-2" onClick={() => setReloadKey(k => k + 1)}>
+              Retry
+            </button>
+          </div>
         ) : filteredProjects.length > 0 ? (
-          filteredProjects.map(project => (
-            <ProjectCard 
-              key={project.id} 
-              project={project} 
-              onClick={() => navigate('project', project.id)} 
-            />
-          ))
+          <ul>
+            {filteredProjects.map(project => (
+              <ProjectRow key={project.id} project={project} onOpen={() => navigate('project', project.id)} />
+            ))}
+          </ul>
         ) : (
-          <div className="col-span-full py-20 text-center space-y-4">
-            <div className="bg-slate-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
-              <Clock className="w-8 h-8 text-slate-400" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900">No projects found</h3>
-            <p className="text-slate-500">Try adjusting your search or filters to find what you're looking for.</p>
+          <div className="px-5 py-4 text-sm text-muted">
+            {projects.length === 0 ? (
+              <>Nobody has posted a project{geoFilter ? ' near you' : ''} yet. <button type="button" className="text-ink font-medium underline underline-offset-2" onClick={() => navigate('create')}>Post the first one</button></>
+            ) : (
+              <>No {filterStatus === 'All' ? '' : `${filterStatus.toLowerCase()} `}projects match{term ? ` “${searchTerm.trim()}”` : ''}.{' '}
+                <button type="button" className="text-ink font-medium underline underline-offset-2" onClick={() => { setSearchTerm(''); setFilterStatus('All'); }}>
+                  Clear filters
+                </button>
+              </>
+            )}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

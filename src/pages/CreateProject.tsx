@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../App';
-import { Rocket, Tag, Users, Clock, Briefcase, AlertCircle, CheckCircle, Compass } from 'lucide-react';
 import { isSameDay } from 'date-fns';
 import { projectService, getId, getErrorMessage } from '../services/api';
+import { Button, ErrorText, Notice, cardStyles, cx, inputStyles, labelStyles } from '../components/ui';
 
 interface CreateProjectProps {
   navigate: (page: 'home' | 'profile' | 'create' | 'admin' | 'project', id?: string) => void;
@@ -121,109 +121,157 @@ export function CreateProject({ navigate, projectId }: CreateProjectProps) {
     }
   };
 
-  if (!user) return <div className="text-center py-20">Please sign in to post a project.</div>;
-  if (loadingProject) return <div className="animate-pulse max-w-3xl mx-auto"><div className="h-96 bg-slate-200 rounded-3xl"></div></div>;
+  const handleLocationToggle = (checked: boolean) => {
+    setIncludeLocation(checked);
+    if (checked && !navigator.geolocation) {
+      setLocationCoords(null);
+    } else if (checked) {
+      setLocLoading(true);
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const coarseLat = Math.round(position.coords.latitude * 10) / 10;
+          const coarseLng = Math.round(position.coords.longitude * 10) / 10;
+          setLocationCoords({
+            lat: coarseLat,
+            lng: coarseLng
+          });
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coarseLat}&lon=${coarseLng}&zoom=10`, {
+              headers: {
+                'Accept-Language': 'en',
+                'User-Agent': 'Project-Buddy-Developer'
+              }
+            });
+            const data = await res.json();
+            const city = data.address?.city || data.address?.town || data.address?.village || data.address?.municipality || data.address?.county || '';
+            if (city) {
+              setLocationName(city);
+            }
+          } catch (gerr) {
+            console.error('Nominatim reverse geocode failed:', gerr);
+          }
+          setLocLoading(false);
+        },
+        (err) => {
+          console.error('GPS auto-fill failed:', err);
+          setLocLoading(false);
+        },
+        { enableHighAccuracy: false, timeout: 8000 }
+      );
+    } else {
+      setLocationName('');
+      setLocationCoords(null);
+    }
+  };
+
+  if (!user) return <p className="text-muted">Sign in to post a project.</p>;
+  if (loadingProject) {
+    return (
+      <div aria-busy="true">
+        <div className="h-7 w-56 bg-raised rounded" />
+        <div className={cx(cardStyles, 'h-96 mt-8')} />
+      </div>
+    );
+  }
+
+  const blocked = rateLimitReached && !isEditing;
+  const cancel = () => (isEditing ? navigate('project', projectId) : navigate('home'));
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-4 mb-8">
-          <div className="bg-indigo-600 p-3 rounded-2xl text-white">
-            <Rocket className="w-8 h-8" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-extrabold text-slate-900">{isEditing ? 'Edit Project' : 'Post a Project'}</h1>
-            <p className="text-slate-500">{isEditing ? 'Update the details of your project.' : 'Share your idea and find collaborators.'}</p>
-          </div>
+    <div className="max-w-[1152px]">
+      <h1 className="text-2xl font-medium tracking-[-0.01em]">{isEditing ? 'Edit project' : 'Post a project'}</h1>
+      <p className="text-muted mt-1">
+        {isEditing ? 'Changes show on the project page as soon as you save.' : 'Describe the idea and the people you need. It goes live in the project list straight away.'}
+      </p>
+
+      {blocked && (
+        <div className="mt-6">
+          <Notice>You've posted 5 projects today, the daily limit. You can post again tomorrow.</Notice>
         </div>
+      )}
 
-        {rateLimitReached && !isEditing && (
-          <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3 mb-8">
-            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <h4 className="font-bold text-amber-800">Daily limit reached</h4>
-              <p className="text-amber-700 text-sm">You've reached the limit of 5 projects per day. Please try again tomorrow.</p>
-            </div>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Project Title</label>
-            <input 
+      <form onSubmit={handleSubmit} className="mt-8">
+        <FormSection title="The idea" description="The title and summary are what people see in the project list. The description supports Markdown.">
+          <div>
+            <label htmlFor="cp-title" className={labelStyles}>Title</label>
+            <input
+              id="cp-title"
               required
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               maxLength={120}
-              placeholder="e.g. AI-Powered Task Manager"
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+              placeholder="Campus ride-share board"
+              className={inputStyles}
             />
           </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Short Summary</label>
-            <input 
+          <div>
+            <label htmlFor="cp-summary" className={labelStyles}>Summary</label>
+            <input
+              id="cp-summary"
               required
               type="text"
               value={formData.summary}
               onChange={(e) => setFormData({ ...formData, summary: e.target.value })}
               maxLength={300}
-              placeholder="A brief one-liner about your project"
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+              placeholder="One sentence on what it does and who it is for"
+              className={inputStyles}
             />
           </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Full Description (Markdown supported)</label>
-            <textarea 
+          <div>
+            <label htmlFor="cp-description" className={labelStyles}>Description</label>
+            <textarea
+              id="cp-description"
               required
-              rows={6}
+              rows={8}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Describe the problem, the solution, and what you're looking for..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all min-h-[200px]"
+              placeholder={'## The problem\n\n## What exists so far\n\n## What you need help with'}
+              className={cx(inputStyles, 'h-auto py-2 leading-5 resize-y min-h-48')}
             />
           </div>
+        </FormSection>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                <Tag className="w-4 h-4" /> Tech Stack (comma separated)
-              </label>
-              <input 
-                required
-                type="text"
-                value={formData.techStack}
-                onChange={(e) => setFormData({ ...formData, techStack: e.target.value })}
-                placeholder="React, Firebase, Tailwind..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                <Users className="w-4 h-4" /> Required Roles (comma separated)
-              </label>
-              <input 
-                required
-                type="text"
-                value={formData.requiredRoles}
-                onChange={(e) => setFormData({ ...formData, requiredRoles: e.target.value })}
-                placeholder="Frontend Dev, UI Designer..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-              />
-            </div>
+        <FormSection title="Team and stack" description="Each role you list shows as an open seat until someone with that role joins the team.">
+          <div>
+            <label htmlFor="cp-roles" className={labelStyles}>Roles you need</label>
+            <input
+              id="cp-roles"
+              required
+              type="text"
+              aria-describedby="cp-roles-note"
+              value={formData.requiredRoles}
+              onChange={(e) => setFormData({ ...formData, requiredRoles: e.target.value })}
+              placeholder="Backend developer, UI designer"
+              className={inputStyles}
+            />
+            <p id="cp-roles-note" className="text-xs text-muted mt-1.5">Separate roles with commas.</p>
           </div>
+          <div>
+            <label htmlFor="cp-stack" className={labelStyles}>Stack</label>
+            <input
+              id="cp-stack"
+              required
+              type="text"
+              aria-describedby="cp-stack-note"
+              value={formData.techStack}
+              onChange={(e) => setFormData({ ...formData, techStack: e.target.value })}
+              placeholder="React, Node.js, MongoDB"
+              className={inputStyles}
+            />
+            <p id="cp-stack-note" className="text-xs text-muted mt-1.5">Separate tools with commas.</p>
+          </div>
+        </FormSection>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                <Clock className="w-4 h-4" /> Commitment Level
-              </label>
-              <select 
+        <FormSection title="Time and type" description="Helps people judge whether they can commit before they ask to join.">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="cp-commitment" className={labelStyles}>Time each week</label>
+              <select
+                id="cp-commitment"
                 value={formData.commitmentLevel}
                 onChange={(e) => setFormData({ ...formData, commitmentLevel: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                className={inputStyles}
               >
                 <option>Low (1-5 hrs/week)</option>
                 <option>Medium (5-15 hrs/week)</option>
@@ -231,14 +279,13 @@ export function CreateProject({ navigate, projectId }: CreateProjectProps) {
                 <option>Full-time</option>
               </select>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                <Briefcase className="w-4 h-4" /> Project Type
-              </label>
-              <select 
+            <div>
+              <label htmlFor="cp-type" className={labelStyles}>Kind of project</label>
+              <select
+                id="cp-type"
                 value={formData.projectType}
                 onChange={(e) => setFormData({ ...formData, projectType: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                className={inputStyles}
               >
                 <option>Side Project</option>
                 <option>Startup</option>
@@ -247,107 +294,77 @@ export function CreateProject({ navigate, projectId }: CreateProjectProps) {
               </select>
             </div>
           </div>
+        </FormSection>
 
-          {/* Opt-in Location */}
-          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4 shadow-inner">
-            <label className="flex items-center gap-3 cursor-pointer select-none">
-              <input 
-                type="checkbox"
-                checked={includeLocation}
-                onChange={(e) => {
-                  setIncludeLocation(e.target.checked);
-                  if (e.target.checked && !navigator.geolocation) {
-                    setLocationCoords(null);
-                  } else if (e.target.checked) {
-                    setLocLoading(true);
-                    navigator.geolocation.getCurrentPosition(
-                      async (position) => {
-                        const coarseLat = Math.round(position.coords.latitude * 10) / 10;
-                        const coarseLng = Math.round(position.coords.longitude * 10) / 10;
-                        setLocationCoords({
-                          lat: coarseLat,
-                          lng: coarseLng
-                        });
-                        try {
-                          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${coarseLat}&lon=${coarseLng}&zoom=10`, {
-                            headers: {
-                              'Accept-Language': 'en',
-                              'User-Agent': 'Project-Buddy-Developer'
-                            }
-                          });
-                          const data = await res.json();
-                          const city = data.address?.city || data.address?.town || data.address?.village || data.address?.municipality || data.address?.county || '';
-                          if (city) {
-                            setLocationName(city);
-                          }
-                        } catch (gerr) {
-                          console.error('Nominatim reverse geocode failed:', gerr);
-                        }
-                        setLocLoading(false);
-                      },
-                      (err) => {
-                        console.error('GPS auto-fill failed:', err);
-                        setLocLoading(false);
-                      },
-                      { enableHighAccuracy: false, timeout: 8000 }
-                    );
-                  } else {
-                    setLocationName('');
-                    setLocationCoords(null);
-                  }
-                }}
-                className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded"
-              />
-              <span className="text-sm font-bold text-slate-800">Attach general location to this project (Opt-in)</span>
-            </label>
-            
-            {includeLocation && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 animate-fade-in">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-600">Location Name / Area</label>
-                  <input 
-                    type="text"
-                    value={locationName}
-                    onChange={(e) => setLocationName(e.target.value)}
-                    placeholder="e.g. Mumbai, Tiruchirappalli, Delhi"
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                  />
-                </div>
-                <div className="space-y-2 flex flex-col justify-end">
-                  <span className="text-xs font-bold text-slate-600">GPS Location Cell Target</span>
-                  <div className="text-sm text-slate-500 py-3 px-4 bg-white border border-slate-200 rounded-xl flex items-center gap-2 min-h-[46px]">
-                    {locLoading ? (
-                      <span className="text-indigo-600 animate-pulse font-medium flex items-center gap-1.5">
-                        <Compass className="w-4 h-4 animate-spin" /> Detecting location...
-                      </span>
-                    ) : locationCoords ? (
-                      <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                        Proximity Lock: {locationCoords.lat.toFixed(4)}, {locationCoords.lng.toFixed(4)}
-                      </span>
-                    ) : (
-                      <span className="text-amber-600 font-medium text-xs">
-                        GPS disabled/blocked. Filterable using manual city name only.
-                      </span>
-                    )}
-                  </div>
-                </div>
+        <FormSection title="Location" description="Optional. People nearby find the project with Near me. Only the city and a point rounded to about 10 km are saved.">
+          <label className="flex items-start justify-between gap-4 cursor-pointer">
+            <span>
+              <span className="block text-sm font-medium">Show the project to people nearby</span>
+              <span className="block text-sm text-muted mt-0.5">Your browser will ask for your location once.</span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={includeLocation}
+              onChange={(e) => handleLocationToggle(e.target.checked)}
+              className="peer sr-only"
+            />
+            <span
+              aria-hidden="true"
+              className="relative mt-0.5 w-8 h-[18px] flex-none rounded-full bg-control transition-colors peer-checked:bg-primary peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:w-3.5 after:h-3.5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-3.5"
+            />
+          </label>
+
+          {includeLocation && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="cp-city" className={labelStyles}>City or area</label>
+                <input
+                  id="cp-city"
+                  type="text"
+                  value={locationName}
+                  onChange={(e) => setLocationName(e.target.value)}
+                  placeholder="Pune"
+                  className={inputStyles}
+                />
               </div>
-            )}
-          </div>
+              <div>
+                <span className={labelStyles}>Saved point</span>
+                <p className="h-10 flex items-center text-sm" aria-live="polite">
+                  {locLoading ? (
+                    <span className="text-muted">Finding your location…</span>
+                  ) : locationCoords ? (
+                    <span className="num">{locationCoords.lat.toFixed(1)}, {locationCoords.lng.toFixed(1)} <span className="text-muted">(rounded)</span></span>
+                  ) : (
+                    <span className="text-muted">No location access. People can still find it by city.</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
+        </FormSection>
 
-          {error && <p className="text-red-500 text-sm font-medium">{error}</p>}
-
-          <button 
-            type="submit"
-            disabled={isSubmitting || (rateLimitReached && !isEditing)}
-            className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-8"
-          >
-            {isSubmitting ? (isEditing ? 'Saving...' : 'Posting...') : (isEditing ? 'Save Changes' : 'Launch Project')}
-            <CheckCircle className="w-5 h-5" />
-          </button>
-        </form>
-      </div>
+        <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-3 pt-6 border-t border-line">
+          {error && <div className="sm:mr-auto"><ErrorText>{error}</ErrorText></div>}
+          <Button variant="ghost" onClick={cancel}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={isSubmitting || blocked}>
+            {isSubmitting ? (isEditing ? 'Saving…' : 'Posting…') : (isEditing ? 'Save changes' : 'Post project')}
+          </Button>
+        </div>
+      </form>
     </div>
+  );
+}
+
+// A settings row: what the section is for on the left, its fields in a panel on the right
+function FormSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  return (
+    <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] gap-4 lg:gap-12 py-8 border-t border-line first:border-t-0 first:pt-0">
+      <div>
+        <h2 className="text-base font-medium">{title}</h2>
+        <p className="text-sm text-muted mt-1">{description}</p>
+      </div>
+      <div className={cx(cardStyles, 'p-5 space-y-4')}>{children}</div>
+    </section>
   );
 }

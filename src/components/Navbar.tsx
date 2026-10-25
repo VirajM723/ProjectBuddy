@@ -1,86 +1,120 @@
+import type { ReactNode } from 'react';
 import { useAuth } from '../App';
-import { Layout, PlusCircle, User, LogIn, LogOut, ShieldCheck } from 'lucide-react';
+import { LayoutList, SquarePlus, ShieldCheck, LogOut } from 'lucide-react';
+import { Avatar, Mark, cx } from './ui';
+
+type Page = 'home' | 'profile' | 'create' | 'admin' | 'project';
 
 interface NavbarProps {
-  navigate: (page: 'home' | 'profile' | 'create' | 'admin' | 'project', id?: string) => void;
+  navigate: (page: Page, id?: string) => void;
   currentPage: string;
 }
 
+interface NavItem {
+  page: Page;
+  label: string;
+  icon: ReactNode;
+  active: boolean;
+}
+
 export function Navbar({ navigate, currentPage }: NavbarProps) {
-  const { user, profile, signIn, logout } = useAuth();
+  const { user, profile, logout } = useAuth();
+
+  const items: NavItem[] = [
+    { page: 'home', label: 'Projects', icon: <LayoutList className="w-[18px] h-[18px]" strokeWidth={1.5} />, active: currentPage === 'home' || currentPage === 'project' },
+    { page: 'create', label: 'Post a project', icon: <SquarePlus className="w-[18px] h-[18px]" strokeWidth={1.5} />, active: currentPage === 'create' },
+    { page: 'profile', label: 'Profile', icon: <Avatar name={profile?.name || user?.name} src={profile?.profileImage} size={22} />, active: currentPage === 'profile' },
+  ];
+  if (profile?.role === 'admin') {
+    items.push({ page: 'admin', label: 'Admin', icon: <ShieldCheck className="w-[18px] h-[18px]" strokeWidth={1.5} />, active: currentPage === 'admin' });
+  }
+
+  const go = (page: Page) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    navigate(page);
+  };
+  const hrefFor = (page: Page) => (page === 'home' ? '/' : page === 'create' ? '/create' : `/${page}`);
 
   return (
-    <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          <div className="flex items-center">
-            <button 
-              onClick={() => navigate('home')}
-              className="flex items-center gap-2 text-indigo-600 font-bold text-xl hover:opacity-80 transition-opacity"
-            >
-              <Layout className="w-8 h-8" />
-              <span>Project Buddy</span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {user ? (
-              <>
-                {profile?.role === 'admin' && (
-                  <button
-                    onClick={() => navigate('admin')}
-                    className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      currentPage === 'admin' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    Admin
-                  </button>
+    <>
+      {/* Desktop: icon rail */}
+      <nav aria-label="Main" className="hidden md:flex fixed inset-y-0 left-0 z-40 w-14 flex-col items-center border-r border-line bg-ground py-3">
+        <a href="/" onClick={go('home')} aria-label="Project Buddy, all projects" className="group relative mb-5">
+          <Mark size={32} />
+          <Tip>Project Buddy</Tip>
+        </a>
+        <ul className="flex flex-col items-center gap-1.5">
+          {items.map(item => (
+            <li key={item.page}>
+              <a
+                href={hrefFor(item.page)}
+                onClick={go(item.page)}
+                aria-label={item.label}
+                aria-current={item.active ? 'page' : undefined}
+                className={cx(
+                  'group relative flex items-center justify-center w-10 h-10 rounded-md transition-colors',
+                  item.active ? 'bg-raised text-ink' : 'text-muted hover:text-ink hover:bg-raised/60'
                 )}
-                <button
-                  onClick={() => navigate('create')}
-                  className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    currentPage === 'create' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  Post Project
-                </button>
-                <button
-                  onClick={() => navigate('profile')}
-                  className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    currentPage === 'profile' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <User className="w-4 h-4" />
-                  Profile
-                </button>
-                <button
-                  onClick={logout}
-                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Logout
-                </button>
-                <img 
-                  src={profile?.profileImage || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>'} 
-                  alt="Profile" 
-                  className="w-8 h-8 rounded-full border border-slate-200"
-                  referrerPolicy="no-referrer"
-                />
-              </>
-            ) : (
-              <button
-                onClick={signIn}
-                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
               >
-                <LogIn className="w-4 h-4" />
-                Sign In
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </nav>
+                {item.icon}
+                <Tip>{item.label}</Tip>
+              </a>
+            </li>
+          ))}
+        </ul>
+        <button
+          type="button"
+          onClick={logout}
+          aria-label="Log out"
+          className="group relative mt-auto flex items-center justify-center w-10 h-10 rounded-md text-muted hover:text-ink hover:bg-raised/60 transition-colors"
+        >
+          <LogOut className="w-[18px] h-[18px]" strokeWidth={1.5} />
+          <Tip>Log out</Tip>
+        </button>
+      </nav>
+
+      {/* Phone: top bar with the product, bottom bar with the destinations */}
+      <header className="md:hidden sticky top-0 z-40 flex items-center justify-between h-12 px-4 bg-ground border-b border-line">
+        <a href="/" onClick={go('home')} className="flex items-center gap-2 font-medium">
+          <Mark size={24} />
+          Project Buddy
+        </a>
+        <button type="button" onClick={logout} className="flex items-center gap-1.5 h-9 px-2 -mr-2 text-sm text-muted hover:text-ink">
+          <LogOut className="w-4 h-4" strokeWidth={1.5} />
+          Log out
+        </button>
+      </header>
+      <nav aria-label="Main" className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-line pb-[env(safe-area-inset-bottom)]">
+        <ul className="flex">
+          {items.map(item => (
+            <li key={item.page} className="flex-1">
+              <a
+                href={hrefFor(item.page)}
+                onClick={go(item.page)}
+                aria-current={item.active ? 'page' : undefined}
+                className={cx(
+                  'flex flex-col items-center justify-center gap-1 h-14 text-xs',
+                  item.active ? 'text-ink font-medium' : 'text-muted'
+                )}
+              >
+                {item.icon}
+                {item.page === 'create' ? 'Post' : item.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </>
+  );
+}
+
+function Tip({ children }: { children: ReactNode }) {
+  return (
+    <span
+      role="tooltip"
+      className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 hidden group-hover:block group-focus-visible:block whitespace-nowrap rounded-md bg-primary px-2 py-1 text-xs text-white shadow-md"
+    >
+      {children}
+    </span>
   );
 }

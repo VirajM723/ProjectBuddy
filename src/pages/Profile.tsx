@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { UserProfile, ContributionLog, Endorsement, Project } from '../types';
 import { useAuth } from '../App';
 import { Heatmap } from '../components/Heatmap';
-import { Github, Linkedin, ExternalLink, Award, Plus, Trash2, Edit3, Save, X, Phone, Rocket, CheckCircle, XCircle, Camera } from 'lucide-react';
+import { Github, Linkedin, ExternalLink, Plus, Trash2, Phone, Camera } from 'lucide-react';
+import { subDays } from 'date-fns';
 import { userService, logService, endorsementService, projectService, getId, getErrorMessage } from '../services/api';
+import { Avatar, Button, ErrorText, Pill, buttonStyles, cardStyles, cx, inputStyles, labelStyles, projectStatusTone } from '../components/ui';
 
 // Downscales an uploaded image to a small square-ish JPEG so profile pictures stay lightweight
 function resizeImage(file: File, maxSize = 256): Promise<string> {
@@ -174,412 +176,318 @@ export function Profile({ userId, navigate }: ProfileProps) {
     }
   };
 
-  if (loading) return <div className="animate-pulse space-y-8"><div className="h-64 bg-slate-200 rounded-3xl"></div></div>;
-  if (!profile) return <div className="text-center py-20">Profile not found.</div>;
-
-  return (
-    <div className="space-y-8">
-      {/* Header Card */}
-      <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-32 bg-indigo-600/5"></div>
-        <div className="relative z-10 flex flex-col md:flex-row items-center md:items-end gap-6">
-          <div className="relative group/avatar">
-            <img 
-              src={(isEditing ? editData.profileImage : profile.profileImage) || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="%23DBDBDB"/><circle cx="12" cy="8.5" r="4" fill="%23FFFFFF"/><path d="M12 13.5c-4.4 0-8 2.2-8 5v.5h16v-.5c0-2.8-3.6-5-8-5z" fill="%23FFFFFF"/></svg>'} 
-              alt={profile.name} 
-              className="w-32 h-32 rounded-3xl border-4 border-white shadow-lg object-cover bg-white"
-              referrerPolicy="no-referrer"
-            />
-            {isEditing && (
-              <label 
-                htmlFor="profile-pic-upload" 
-                className="absolute inset-0 bg-black/40 rounded-3xl border-4 border-transparent flex flex-col items-center justify-center text-white cursor-pointer opacity-0 group-hover/avatar:opacity-100 transition-opacity duration-200"
-                title="Upload Photo (Click to select)"
-              >
-                <Camera className="w-6 h-6 mb-1 text-white" />
-                <span className="text-[10px] font-bold text-white uppercase tracking-wider">Upload</span>
-                <input 
-                  type="file" 
-                  id="profile-pic-upload" 
-                  accept="image/*" 
-                  onChange={handleFileChange} 
-                  className="hidden" 
-                />
-              </label>
-            )}
-          </div>
-          <div className="flex-1 text-center md:text-left">
-            <div className="flex flex-col md:flex-row md:items-center gap-2 mb-2">
-              <h1 className="text-3xl font-extrabold text-slate-900">{profile.name}</h1>
-              <span className="text-slate-400 text-sm font-medium">@{profile.email.split('@')[0]}</span>
-            </div>
-            {isEditing ? (
-              <textarea 
-                value={editData.bio || ''}
-                onChange={(e) => setEditData({ ...editData, bio: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="Write a short bio..."
-              />
-            ) : (
-              <p className="text-slate-600 max-w-2xl">{profile.bio || "No bio yet."}</p>
-            )}
-          </div>
-          <div className="flex gap-2">
-            {isOwnProfile && (
-              isEditing ? (
-                <>
-                  <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-60">
-                    <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save'}
-                  </button>
-                  <button onClick={() => { setIsEditing(false); setEditData(profile); setSaveError(null); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-xl font-bold hover:bg-slate-200 transition-colors">
-                    <X className="w-4 h-4" /> Cancel
-                  </button>
-                </>
-              ) : (
-                <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 bg-white text-indigo-600 border border-indigo-200 px-4 py-2 rounded-xl font-bold hover:bg-indigo-50 transition-colors shadow-sm">
-                  <Edit3 className="w-4 h-4" /> Edit Profile
-                </button>
-              )
-            )}
+  if (loading) {
+    return (
+      <div aria-busy="true">
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 rounded-full bg-raised" />
+          <div>
+            <div className="h-7 w-48 bg-raised rounded" />
+            <div className="h-4 w-72 bg-raised rounded mt-2" />
           </div>
         </div>
+        <div className={cx(cardStyles, 'h-24 mt-6')} />
+        <div className={cx(cardStyles, 'h-48 mt-3')} />
+      </div>
+    );
+  }
+  if (!profile) {
+    return (
+      <div>
+        <h1 className="text-2xl font-medium">Profile not found</h1>
+        <p className="text-muted mt-1">This account may have been deleted.</p>
+      </div>
+    );
+  }
 
-        {saveError && (
-          <p className="mt-4 text-sm font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2">{saveError}</p>
-        )}
+  // Figures for the strip, all computed from the rows on this screen
+  const yearAgo = subDays(new Date(), 364);
+  const lastYear = logs.filter(l => new Date(l.date || l.createdAt) >= yearAgo);
+  const activeDays = new Set(lastYear.map(l => l.date || l.createdAt.slice(0, 10))).size;
+  const projectCount = userProjects.length + collaborations.length;
+  const stats = [
+    { label: 'Contributions', value: logs.length, note: 'all time' },
+    { label: 'Active days', value: activeDays, note: 'in the last year' },
+    { label: 'Endorsements', value: endorsements.length, note: `across ${new Set(endorsements.map(e => e.skill)).size} skills` },
+    { label: 'Projects', value: projectCount, note: `${userProjects.length} owned · ${collaborations.length} joined` },
+  ];
 
-        <div className="mt-8 flex flex-wrap gap-4 justify-center md:justify-start">
-          {isEditing ? (
-            <div className="flex flex-col gap-4 w-full max-w-md">
-              <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200" title="Paste any direct image URL (optional)">
-                <Camera className="w-5 h-5 text-indigo-500" />
-                <input 
-                  type="text" 
-                  value={editData.profileImage || ''} 
-                  onChange={(e) => setEditData({ ...editData, profileImage: e.target.value })}
-                  placeholder="Paste direct profile image URL (optional)"
-                  className="bg-transparent outline-none text-sm flex-1 font-medium placeholder-slate-400"
-                />
-              </div>
-              <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                <Github className="w-5 h-5 text-slate-400" />
-                <input 
-                  type="text" 
-                  value={editData.githubLink || ''} 
-                  onChange={(e) => setEditData({ ...editData, githubLink: e.target.value })}
-                  placeholder="GitHub URL"
-                  className="bg-transparent outline-none text-sm flex-1"
-                />
-              </div>
-              <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                <Linkedin className="w-5 h-5 text-slate-400" />
-                <input 
-                  type="text" 
-                  value={editData.linkedinLink || ''} 
-                  onChange={(e) => setEditData({ ...editData, linkedinLink: e.target.value })}
-                  placeholder="LinkedIn URL"
-                  className="bg-transparent outline-none text-sm flex-1"
-                />
-              </div>
-              <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                <ExternalLink className="w-5 h-5 text-slate-400" />
-                <input 
-                  type="text" 
-                  value={editData.resumeLink || ''} 
-                  onChange={(e) => setEditData({ ...editData, resumeLink: e.target.value })}
-                  placeholder="Resume/Portfolio URL"
-                  className="bg-transparent outline-none text-sm flex-1"
-                />
-              </div>
-              {isOwnProfile && (
-                <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                  <Phone className="w-5 h-5 text-slate-400" />
-                  <input 
-                    type="text" 
-                    value={editData.phoneNumber || ''} 
-                    onChange={(e) => setEditData({ ...editData, phoneNumber: e.target.value })}
-                    placeholder="Contact Number (Visible to collaborators)"
-                    className="bg-transparent outline-none text-sm flex-1"
-                  />
-                </div>
-              )}
+  const skills = (isEditing ? editData.skills : profile.skills) || [];
+  const firstName = profile.name.split(' ')[0];
+
+  const projectList = (list: Project[], isOwnerList: boolean) => (
+    <ul>
+      {list.map(project => {
+        const myRole = project.userRoles?.[userId || ''];
+        const isEditingRole = editingRoleProjectId === project.id;
+        return (
+          <li key={project.id} className="py-3 border-t border-rule first:border-t-0">
+            <div className="flex items-start justify-between gap-3">
+              <a
+                href={`/project/${project.id}`}
+                onClick={(e) => { e.preventDefault(); navigate('project', project.id); }}
+                className="font-medium hover:underline underline-offset-2 min-w-0"
+              >
+                {project.title}
+              </a>
+              <Pill tone={projectStatusTone(project.status)}>{project.status}</Pill>
             </div>
-          ) : (
+            {isEditingRole ? (
+              <form
+                onSubmit={(e) => { e.preventDefault(); handleUpdateRole(project.id); }}
+                className="flex items-center gap-2 mt-2"
+              >
+                <label className="sr-only" htmlFor={`role-${project.id}`}>Your role on {project.title}</label>
+                <input
+                  id={`role-${project.id}`}
+                  type="text"
+                  value={tempRole}
+                  onChange={(e) => setTempRole(e.target.value)}
+                  maxLength={50}
+                  placeholder="Your role"
+                  className={cx(inputStyles, 'h-8 max-w-56')}
+                  autoFocus
+                />
+                <Button type="submit" variant="secondary" className="h-8 px-3">Save</Button>
+                <Button variant="ghost" className="h-8 px-3" onClick={() => setEditingRoleProjectId(null)}>Cancel</Button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-2 mt-0.5 text-sm text-muted">
+                <span>{isOwnProfile ? 'Your role' : 'Role'}: <span className="text-ink">{myRole || (isOwnerList ? 'Owner' : 'Not set')}</span></span>
+                {isOwnProfile && (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingRoleProjectId(project.id); setTempRole(myRole || (isOwnerList ? 'Owner' : '')); }}
+                    className="text-ink underline underline-offset-2"
+                  >
+                    Change
+                  </button>
+                )}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+        <div className="relative flex-none group/avatar w-16 h-16">
+          <Avatar name={profile.name} src={isEditing ? editData.profileImage : profile.profileImage} size={64} />
+          {isEditing && (
+            <label
+              htmlFor="profile-pic-upload"
+              className="absolute inset-0 rounded-full bg-black/45 flex items-center justify-center text-white cursor-pointer opacity-0 group-hover/avatar:opacity-100 focus-within:opacity-100 transition-opacity"
+              title="Upload a photo"
+            >
+              <Camera className="w-5 h-5" strokeWidth={1.5} />
+              <span className="sr-only">Upload a photo</span>
+              <input type="file" id="profile-pic-upload" accept="image/*" onChange={handleFileChange} className="sr-only" />
+            </label>
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <h1 className="text-2xl font-medium tracking-[-0.01em]">{profile.name}</h1>
+            <span className="text-muted">@{profile.email.split('@')[0]}</span>
+          </div>
+          {!isEditing && (
             <>
-              {profile.githubLink && <a href={profile.githubLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><Github className="w-5 h-5" /> GitHub</a>}
-              {profile.linkedinLink && <a href={profile.linkedinLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><Linkedin className="w-5 h-5" /> LinkedIn</a>}
-              {profile.resumeLink && <a href={profile.resumeLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 font-medium text-sm"><ExternalLink className="w-5 h-5" /> Portfolio</a>}
-              {profile.phoneNumber && (
-                <div className="flex items-center gap-2 text-slate-600 font-medium text-sm">
-                  <Phone className="w-5 h-5 text-indigo-600" /> 
-                  {profile.phoneNumber}
-                  <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full uppercase font-bold">Collaborator Only</span>
-                </div>
-              )}
+              <p className={cx('mt-1 max-w-2xl', !profile.bio && 'text-muted')}>{profile.bio || 'No bio yet.'}</p>
+              <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3 text-sm">
+                {profile.githubLink && <li><a href={profile.githubLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 hover:underline underline-offset-2"><Github className="w-4 h-4 text-muted" strokeWidth={1.5} />GitHub</a></li>}
+                {profile.linkedinLink && <li><a href={profile.linkedinLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 hover:underline underline-offset-2"><Linkedin className="w-4 h-4 text-muted" strokeWidth={1.5} />LinkedIn</a></li>}
+                {profile.resumeLink && <li><a href={profile.resumeLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 hover:underline underline-offset-2"><ExternalLink className="w-4 h-4 text-muted" strokeWidth={1.5} />Portfolio</a></li>}
+                {profile.phoneNumber && (
+                  <li className="inline-flex items-center gap-1.5">
+                    <Phone className="w-4 h-4 text-muted" strokeWidth={1.5} />
+                    <span className="num">{profile.phoneNumber}</span>
+                    <span className="text-muted">· visible to collaborators</span>
+                  </li>
+                )}
+              </ul>
             </>
           )}
         </div>
+
+        {isOwnProfile && (
+          <div className="flex gap-2 flex-none">
+            {isEditing ? (
+              <>
+                <Button variant="ghost" onClick={() => { setIsEditing(false); setEditData(profile); setSaveError(null); }}>Cancel</Button>
+                <Button variant="primary" onClick={handleSave} disabled={isSaving}>{isSaving ? 'Saving…' : 'Save profile'}</Button>
+              </>
+            ) : (
+              <Button onClick={() => setIsEditing(true)}>Edit profile</Button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Contribution Heatmap */}
-      <div className="space-y-4">
-        <h3 className="text-xl font-bold text-slate-900 px-2">Contribution Activity</h3>
+      {saveError && <div className="mt-4"><ErrorText>{saveError}</ErrorText></div>}
+
+      {/* Editing the profile's fields */}
+      {isEditing && (
+        <section className={cx(cardStyles, 'p-5 mt-6')}>
+          <h2 className="text-base font-medium">About you</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div className="md:col-span-2">
+              <label htmlFor="pf-bio" className={labelStyles}>Bio</label>
+              <textarea
+                id="pf-bio"
+                rows={3}
+                value={editData.bio || ''}
+                onChange={(e) => setEditData({ ...editData, bio: e.target.value })}
+                placeholder="What you build and what you want to work on"
+                className={cx(inputStyles, 'h-auto py-2 leading-5 resize-y')}
+              />
+            </div>
+            <div>
+              <label htmlFor="pf-github" className={labelStyles}>GitHub</label>
+              <input id="pf-github" type="url" value={editData.githubLink || ''} onChange={(e) => setEditData({ ...editData, githubLink: e.target.value })} placeholder="https://github.com/you" className={inputStyles} />
+            </div>
+            <div>
+              <label htmlFor="pf-linkedin" className={labelStyles}>LinkedIn</label>
+              <input id="pf-linkedin" type="url" value={editData.linkedinLink || ''} onChange={(e) => setEditData({ ...editData, linkedinLink: e.target.value })} placeholder="https://linkedin.com/in/you" className={inputStyles} />
+            </div>
+            <div>
+              <label htmlFor="pf-portfolio" className={labelStyles}>Portfolio or resume</label>
+              <input id="pf-portfolio" type="url" value={editData.resumeLink || ''} onChange={(e) => setEditData({ ...editData, resumeLink: e.target.value })} placeholder="https://" className={inputStyles} />
+            </div>
+            <div>
+              <label htmlFor="pf-phone" className={labelStyles}>Phone</label>
+              <input id="pf-phone" type="tel" aria-describedby="pf-phone-note" value={editData.phoneNumber || ''} onChange={(e) => setEditData({ ...editData, phoneNumber: e.target.value })} className={inputStyles} />
+              <p id="pf-phone-note" className="text-xs text-muted mt-1.5">Only people on your projects can see it.</p>
+            </div>
+            <div className="md:col-span-2">
+              <label htmlFor="pf-photo" className={labelStyles}>Photo</label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  id="pf-photo"
+                  type="text"
+                  value={editData.profileImage?.startsWith('data:') ? '' : editData.profileImage || ''}
+                  onChange={(e) => setEditData({ ...editData, profileImage: e.target.value })}
+                  placeholder="Paste an image link, or upload a file"
+                  className={inputStyles}
+                />
+                <label htmlFor="profile-pic-upload-2" className={cx(buttonStyles.secondary, 'h-10 cursor-pointer')}>
+                  <Camera className="w-4 h-4" strokeWidth={1.5} />
+                  Upload
+                  <input type="file" id="profile-pic-upload-2" accept="image/*" onChange={handleFileChange} className="sr-only" />
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Figures */}
+      <section aria-label="Activity summary" className={cx(cardStyles, 'mt-6 grid grid-cols-2 lg:grid-cols-4')}>
+        {stats.map((stat, i) => (
+          <div
+            key={stat.label}
+            className={cx(
+              'px-5 py-4',
+              i % 2 === 1 && 'border-l border-line',
+              i >= 2 && 'border-t border-line lg:border-t-0',
+              i === 2 && 'lg:border-l'
+            )}
+          >
+            <div className="text-sm text-muted">{stat.label}</div>
+            <div className="num text-[30px] leading-9 mt-1">{stat.value.toLocaleString('en-IN')}</div>
+            <div className="text-xs text-muted mt-0.5">{stat.note}</div>
+          </div>
+        ))}
+      </section>
+
+      {/* Activity over the year */}
+      <section className={cx(cardStyles, 'p-5 mt-3')}>
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+          <h2 className="text-base font-medium">Activity</h2>
+          <span className="text-sm text-muted num">{lastYear.length.toLocaleString('en-IN')} contributions in the last year</span>
+        </div>
         <Heatmap logs={logs} />
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Skills & Endorsements */}
-        <div className="lg:col-span-2 bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-          <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-            <Award className="w-6 h-6 text-indigo-600" />
-            Skills & Endorsements
-          </h3>
-          
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3 items-start">
+        {/* Skills */}
+        <section className={cx(cardStyles, 'p-5')}>
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-base font-medium">Skills</h2>
+            {!isEditing && <span className="text-sm text-muted">Endorsed by people {firstName} has worked with</span>}
+          </div>
+
           {isEditing && (
-            <div className="flex gap-2 mb-6">
-              <input 
+            <form onSubmit={(e) => { e.preventDefault(); handleAddSkill(); }} className="flex gap-2 mt-4">
+              <label htmlFor="new-skill" className="sr-only">Add a skill</label>
+              <input
+                id="new-skill"
                 type="text"
                 value={newSkill}
                 onChange={(e) => setNewSkill(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSkill(); } }}
                 maxLength={40}
-                placeholder="Add a skill..."
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Add a skill"
+                className={inputStyles}
               />
-              <button onClick={handleAddSkill} className="bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 transition-colors">
-                <Plus className="w-5 h-5" />
-              </button>
-            </div>
+              <Button type="submit" className="h-10"><Plus className="w-4 h-4" strokeWidth={1.5} />Add</Button>
+            </form>
           )}
 
-          <div className="space-y-6">
-            {(isEditing ? editData.skills : profile.skills)?.map(skill => {
-              const skillEndorsements = endorsements.filter(e => e.skill === skill);
-              const hasEndorsed = skillEndorsements.some(e => getId(e.endorsedBy) === user?.id);
-
-              return (
-                <div key={skill} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-white px-3 py-1 rounded-lg border border-slate-200 font-bold text-slate-700">
-                      {skill}
-                    </div>
-                    <div className="flex -space-x-2">
-                      {skillEndorsements.slice(0, 5).map(e => {
-                        const endorserName = typeof e.endorsedBy === 'object' ? e.endorsedBy.name : 'User';
-                        const initials = endorserName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+          {skills.length > 0 ? (
+            <ul className="mt-3">
+              {skills.map(skill => {
+                const skillEndorsements = endorsements.filter(e => e.skill === skill);
+                const hasEndorsed = skillEndorsements.some(e => getId(e.endorsedBy) === user?.id);
+                return (
+                  <li key={skill} className="flex items-center gap-3 min-h-12 py-2 border-t border-rule first:border-t-0">
+                    <span className="font-medium flex-1 min-w-0 truncate">{skill}</span>
+                    <span className="flex -space-x-1">
+                      {skillEndorsements.slice(0, 4).map(e => {
+                        const endorserName = typeof e.endorsedBy === 'object' ? e.endorsedBy.name : 'Member';
                         return (
-                          <div key={e.id} className="w-8 h-8 rounded-full border-2 border-white bg-indigo-100 flex items-center justify-center text-[10px] font-bold text-indigo-600" title={endorserName}>
-                            {initials}
-                          </div>
+                          <span key={e.id} title={endorserName} className="rounded-full ring-2 ring-surface">
+                            <Avatar name={endorserName} src={typeof e.endorsedBy === 'object' ? e.endorsedBy.profileImage : null} size={22} />
+                          </span>
                         );
                       })}
-                      {skillEndorsements.length > 5 && (
-                        <div className="w-8 h-8 rounded-full border-2 border-white bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-600">
-                          +{skillEndorsements.length - 5}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
+                    </span>
+                    <span className={cx('num text-sm w-6 text-right', skillEndorsements.length === 0 && 'text-muted')}>
+                      {skillEndorsements.length}
+                    </span>
                     {isEditing ? (
-                      <button onClick={() => handleRemoveSkill(skill)} className="text-red-400 hover:text-red-600 transition-colors">
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    ) : (
-                      !isOwnProfile && user && (
-                        <button 
-                          onClick={() => handleAddEndorsement(skill)}
-                          disabled={hasEndorsed}
-                          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                            hasEndorsed 
-                              ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
-                              : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm'
-                          }`}
-                        >
-                          <Plus className="w-4 h-4" />
-                          {hasEndorsed ? 'Endorsed' : 'Endorse'}
+                      <Button variant="danger" className="h-8 px-3" onClick={() => handleRemoveSkill(skill)} aria-label={`Remove ${skill}`}>
+                        <Trash2 className="w-4 h-4" strokeWidth={1.5} />
+                      </Button>
+                    ) : !isOwnProfile && user ? (
+                      hasEndorsed ? (
+                        <span className="w-[84px] text-sm text-muted text-right">Endorsed</span>
+                      ) : (
+                        <button type="button" onClick={() => handleAddEndorsement(skill)} className={cx(buttonStyles.ghost, 'h-8 px-3 w-[84px] border border-control hover:border-ink hover:bg-surface')}>
+                          Endorse
                         </button>
                       )
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {(!isEditing && profile.skills.length === 0) && (
-              <p className="text-slate-400 text-center py-8 italic">No skills listed yet.</p>
-            )}
-          </div>
-        </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="text-muted mt-3">{isOwnProfile ? 'No skills yet. Add some so project owners can find you.' : 'No skills listed yet.'}</p>
+          )}
+        </section>
 
-        {/* Projects & Collaborations */}
-        <div className="lg:col-span-2 space-y-8">
-          <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-            <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-              <Rocket className="w-6 h-6 text-indigo-600" />
-              Projects & Collaborations
-            </h3>
-
-            <div className="space-y-8">
-              {/* Created Projects */}
-              <div>
-                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Created Projects</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {userProjects.map(project => {
-                    const myRole = project.userRoles?.[userId || ''];
-                    const isEditingRole = editingRoleProjectId === project.id;
-
-                    return (
-                      <div key={project.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-colors">
-                        <div className="flex justify-between items-start mb-2">
-                          <h5 className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{project.title}</h5>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                            project.status === 'Open' ? 'bg-emerald-50 text-emerald-600' :
-                            project.status === 'Completed' ? 'bg-slate-200 text-slate-600' : 'bg-blue-50 text-blue-600'
-                          }`}>
-                            {project.status}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 line-clamp-2 mb-3">{project.summary}</p>
-                        
-                        <div className="flex items-center justify-between mt-auto">
-                          <div className="flex items-center gap-2">
-                            {isEditingRole ? (
-                              <div className="flex items-center gap-1">
-                                <input 
-                                  type="text"
-                                  value={tempRole}
-                                  onChange={(e) => setTempRole(e.target.value)}
-                                  className="text-[10px] bg-white border border-slate-200 rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 w-24"
-                                  placeholder="Your role..."
-                                  autoFocus
-                                />
-                                <button onClick={() => handleUpdateRole(project.id)} className="text-emerald-600 hover:text-emerald-700"><CheckCircle className="w-3 h-3" /></button>
-                                <button onClick={() => setEditingRoleProjectId(null)} className="text-red-600 hover:text-red-700"><XCircle className="w-3 h-3" /></button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-slate-400 font-medium">Role:</span>
-                                <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold">
-                                  {myRole || 'Owner'}
-                                </span>
-                                {isOwnProfile && (
-                                  <button 
-                                    onClick={() => {
-                                      setEditingRoleProjectId(project.id);
-                                      setTempRole(myRole || 'Owner');
-                                    }}
-                                    className="text-slate-400 hover:text-indigo-600 transition-colors"
-                                  >
-                                    <Edit3 className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <button 
-                            onClick={() => navigate('project', project.id)}
-                            className="text-[10px] text-indigo-600 font-bold hover:underline"
-                          >
-                            View Details
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {userProjects.length === 0 && <p className="text-slate-400 text-sm italic col-span-full">No projects created yet.</p>}
-                </div>
-              </div>
-
-              {/* Collaborations */}
-              <div>
-                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Collaborations</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {collaborations.map(project => {
-                    const myRole = project.userRoles?.[userId || ''];
-                    const isEditingRole = editingRoleProjectId === project.id;
-
-                    return (
-                      <div key={project.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-colors">
-                        <div className="flex justify-between items-start mb-2">
-                          <h5 className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{project.title}</h5>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                            project.status === 'Open' ? 'bg-emerald-50 text-emerald-600' :
-                            project.status === 'Completed' ? 'bg-slate-200 text-slate-600' : 'bg-blue-50 text-blue-600'
-                          }`}>
-                            {project.status}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 line-clamp-2 mb-3">{project.summary}</p>
-                        
-                        <div className="flex items-center justify-between mt-auto">
-                          <div className="flex items-center gap-2">
-                            {isEditingRole ? (
-                              <div className="flex items-center gap-1">
-                                <input 
-                                  type="text"
-                                  value={tempRole}
-                                  onChange={(e) => setTempRole(e.target.value)}
-                                  className="text-[10px] bg-white border border-slate-200 rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 w-24"
-                                  placeholder="Your role..."
-                                  autoFocus
-                                />
-                                <button onClick={() => handleUpdateRole(project.id)} className="text-emerald-600 hover:text-emerald-700"><CheckCircle className="w-3 h-3" /></button>
-                                <button onClick={() => setEditingRoleProjectId(null)} className="text-red-600 hover:text-red-700"><XCircle className="w-3 h-3" /></button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-slate-400 font-medium">Role:</span>
-                                <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold">
-                                  {myRole || 'Not set'}
-                                </span>
-                                {isOwnProfile && (
-                                  <button 
-                                    onClick={() => {
-                                      setEditingRoleProjectId(project.id);
-                                      setTempRole(myRole || '');
-                                    }}
-                                    className="text-slate-400 hover:text-indigo-600 transition-colors"
-                                  >
-                                    <Edit3 className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <button 
-                            onClick={() => navigate('project', project.id)}
-                            className="text-[10px] text-indigo-600 font-bold hover:underline"
-                          >
-                            View Details
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {collaborations.length === 0 && <p className="text-slate-400 text-sm italic col-span-full">No collaborations yet.</p>}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Stats Sidebar */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-6">Reputation</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-50 p-4 rounded-2xl text-center">
-                <div className="text-2xl font-black text-indigo-600">{logs.length}</div>
-                <div className="text-[10px] text-slate-500 font-bold uppercase">Contributions</div>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-2xl text-center">
-                <div className="text-2xl font-black text-emerald-600">{endorsements.length}</div>
-                <div className="text-[10px] text-slate-500 font-bold uppercase">Endorsements</div>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Projects */}
+        <section className={cx(cardStyles, 'p-5')}>
+          <h2 className="text-base font-medium">Projects</h2>
+          <h3 className="text-xs text-muted mt-4 mb-1">Owns {userProjects.length}</h3>
+          {userProjects.length > 0 ? projectList(userProjects, true) : <p className="text-muted py-2">Hasn't posted a project yet.</p>}
+          <h3 className="text-xs text-muted mt-5 mb-1">Member of {collaborations.length}</h3>
+          {collaborations.length > 0 ? projectList(collaborations, false) : <p className="text-muted py-2">Hasn't joined a team yet.</p>}
+        </section>
       </div>
     </div>
   );
