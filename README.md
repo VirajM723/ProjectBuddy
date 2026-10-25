@@ -1,200 +1,178 @@
 # Project Buddy
 
-A full-stack developer collaboration platform for discovering projects,
-finding collaborators, communicating in real time, and tracking project
-progress.
+A full-stack collaboration platform where developers post side projects,
+find people to build them with, talk in real time, and track progress.
 
 **Live Demo:** https://projectbuddy-dzn3.onrender.com
 
 **GitHub:** https://github.com/VirajM723/ProjectBuddy
 
+![Project list](README_assets/dashboard.png)
+
 ------------------------------------------------------------------------
 
 ## Overview
 
-Project Buddy is a web application designed to help developers connect
-and collaborate on software projects. Users can create projects, find
-collaborators, communicate through project-specific chat, manage
-milestones, and track contributions from a single platform.
+Project Buddy helps developers connect and collaborate on software
+projects. Owners post a project with the roles they need; other users
+browse the list, ask to join, and once accepted, work together through a
+project chat and a shared progress log. Every contribution feeds a
+profile heatmap, and skills can be endorsed by teammates.
 
-The application also includes location-based project discovery, activity
-tracking, and backend protections against spam and abuse.
+The app also supports location-based discovery, and the backend
+protects itself against spam and abuse with rate limiting.
 
 ## Features
 
 ### Authentication
 
-Project Buddy uses JWT-based authentication to secure user sessions.
-
--   Register and log in using email and password
--   Secure password hashing with bcrypt
--   Protected routes using JWT
--   Role-based authorization
--   Default profile picture assigned during registration
--   Upload a custom profile picture at any time
+-   Register and sign in with email and password
+-   Passwords hashed with bcrypt
+-   JWT-protected API routes, with the session restored on page reload
+-   Role-based access (members and admins)
 
 ------------------------------------------------------------------------
 
-### Project Management
+### Projects
 
-Create projects and manage collaborators from a single dashboard.
-
--   Create and edit projects
--   Add descriptions, required skills, tech stack, and commitment level
--   Search projects by title, description, creator, tags, or
-    technologies
--   Filter projects based on skills, tech stack, location, and
-    commitment
--   Browse projects posted by the community
+-   Post and edit projects: title, summary, Markdown description, tech
+    stack, the roles you need, weekly time commitment and project type
+-   Search by title, summary, tech stack or role
+-   Filter by status (open, ongoing, completed) and by distance with
+    **Near me**
+-   Every project shows its team at a glance: filled squares for
+    members, outlined squares for roles nobody has taken yet
 
 ------------------------------------------------------------------------
 
-### Collaboration System
+### Joining a Team
 
-Users can apply to projects and project owners can manage incoming
-applications.
-
--   Send collaboration requests
--   Accept or reject applicants
--   Manage project members
--   Keep track of team composition
-
-------------------------------------------------------------------------
-
-### Real-Time Project Chat
-
-Each project includes a dedicated chat room powered by native
-WebSockets.
-
--   Instant messaging between collaborators
--   Project-specific conversations
--   Messages are stored in MongoDB for future access
--   Automatically synchronizes conversations across connected users
+-   Ask to join with a message to the owner
+-   Owners see waiting requests at the top of the project page and can
+    accept or decline them
+-   The team panel lists the owner, each member with their role, and the
+    roles that are still open
+-   Members set their own role on each project from their profile
 
 ------------------------------------------------------------------------
 
-### Live Activity Feed
+### Team Chat
 
-Every project maintains an activity feed that updates in real time.
+Each project has a chat room for its owner and members, built on
+Socket.IO.
 
-The feed records important events such as:
+-   Messages arrive instantly for everyone on the team
+-   Messages are stored in MongoDB, so history survives reloads
+-   Falls back to refreshing every few seconds if the live connection
+    drops
 
--   New collaborators joining
--   Project updates
--   Milestone completion
-
-This allows team members to stay informed without manually checking
-project details.
-
-------------------------------------------------------------------------
-
-### Project Milestones
-
-Projects can be divided into milestones to organize development.
-
-Users can:
-
--   Create milestones
--   Assign milestones to collaborators
--   Mark milestones as completed
--   Track overall project progress
--   View milestone history through activity logs
+![Team chat](README_assets/chat.png)
 
 ------------------------------------------------------------------------
 
-### Contribution Tracking
+### Progress Log
 
-Project Buddy includes a GitHub-style contribution heatmap built using
-D3.js.
-
-The heatmap provides a visual overview of user activity by tracking:
-
--   Daily contributions
--   Project participation
--   Development consistency
+Team members log milestones and finished tasks on the project's
+**Progress** tab. Joining a team is recorded there automatically, so the
+log doubles as the project's history.
 
 ------------------------------------------------------------------------
 
-### User Profiles
+### Contribution Heatmap
 
-Every user has a public profile showcasing their work and activity.
+A GitHub-style heatmap, drawn with D3.js, shows each person's
+contributions per day over the last year.
 
-Profiles include:
+![Contribution heatmap](README_assets/heatmap.png)
 
--   Bio
--   Technical skills
--   Projects
--   Contribution heatmap
--   Activity history
--   External links
--   Profile picture
+------------------------------------------------------------------------
 
-New accounts automatically receive a default profile image until one is uploaded via URL.
+### Profiles
+
+Every user has a public profile with:
+
+-   Bio, skills and links (GitHub, LinkedIn, portfolio)
+-   A phone number that only collaborators can see
+-   Contribution, active-day, endorsement and project counts
+-   The contribution heatmap
+-   Projects they own and teams they belong to
+-   A profile photo, uploaded from a file (resized in the browser) or
+    linked by URL; people without one get their initials
 
 ------------------------------------------------------------------------
 
 ### Skill Endorsements
 
-Users can endorse the technical skills of other developers.
-
-These endorsements help showcase experience and improve profile
-credibility.
+Users can endorse each other's skills. Each skill on a profile shows who
+endorsed it and how many times.
 
 ------------------------------------------------------------------------
 
-### Location-Based Project Discovery
+### Location-Based Discovery
 
-Projects are indexed using H3 spatial indexing to support location-aware
-discovery.
+Projects can carry an opt-in location: a city name and a point rounded
+to about 10 km. Locations are indexed with H3, so **Near me** finds
+projects in the surrounding area and works together with search and
+status filters.
 
-Users can:
+------------------------------------------------------------------------
 
--   Filter projects near their location
--   Discover local collaboration opportunities
--   Combine location filters with existing search and filter options
+### Admin
+
+Admins get a page listing every member and project, with the option to
+delete either. Deleting a member also removes their projects, requests
+and activity.
 
 ------------------------------------------------------------------------
 
 ### Rate Limiting & Spam Prevention
 
-The backend uses `express-rate-limit` to prevent abuse and protect
-application resources.
+The backend uses `express-rate-limit` to prevent abuse:
 
-```md
-Configured limits:
+-   Sign in: 10 attempts per 15 minutes
+-   Registration: 10 accounts per hour
+-   Posting projects: 5 per day
+-   Requests to join: 10 per hour
+-   All API calls: 300 per minute
 
-- Login / Register: 10 attempts per 15 minutes per IP
-- Project Creation: Maximum 5 projects per day per user
-- Collaboration Requests: Maximum 10 requests per hour per user
+------------------------------------------------------------------------
 
-These limits help prevent spam, brute-force attacks, and excessive API usage while maintaining a smooth user experience.
-```
+### Design
 
-
-These limits reduce spam, brute-force attacks, and excessive API usage
-while maintaining a smooth user experience.
+The interface uses a neutral palette with one accent colour reserved for
+data (open roles and activity), the Geist typeface, and layouts built
+for both desktop and phone: an icon rail on wide screens, a bottom tab
+bar on phones.
 
 ## Screenshots
 
-![](README_assets/dashboard.png)
+**Project page:** team panel, waiting requests, and the description
 
-![](README_assets/project.png)
+![Project page](README_assets/project.png)
 
-![](README_assets/create-project.png)
+**Profile**
 
-![](README_assets/chat.png)
+![Profile](README_assets/profile.png)
 
-![](README_assets/heatmap.png)
+**Posting a project**
 
-![](README_assets/profile.png)
+![Post a project](README_assets/create-project.png)
+
+**Sign in:** shows projects currently looking for people
+
+![Sign in](README_assets/sign-in.png)
+
+**On a phone**
+
+<img src="README_assets/mobile.png" alt="Project list on a phone" width="320" />
 
 ## Tech Stack
 
-**Frontend** - React - TypeScript - Vite - Tailwind CSS - Framer
-Motion - Axios - D3.js
+**Frontend:** React, TypeScript, Vite, Tailwind CSS, Axios, D3.js,
+Socket.IO client, react-markdown, Lucide icons
 
-**Backend** - Node.js - Express.js - MongoDB - Mongoose - JWT - Native
-WebSockets - bcrypt - express-rate-limit - H3.js
+**Backend:** Node.js, Express, MongoDB, Mongoose, JWT, Socket.IO,
+bcrypt, express-rate-limit, H3
 
 ## Installation
 
@@ -220,6 +198,8 @@ Start the development server.
 npm run dev
 ```
 
+Type-check the project with `npm run lint`.
+
 ### Deploying to Render
 
 -   Build command: `npm install && npm run build`
@@ -234,15 +214,15 @@ npm run dev
 -   Authentication
 -   Users
 -   Projects
--   Collaboration Requests
--   Milestones
+-   Requests to join
+-   Progress logs
 -   Chat
--   Activity Logs
--   Skill Endorsements
+-   Skill endorsements
+-   Admin
 
 ## Future Improvements
 
 -   Real-time notifications
--   Mobile responsive improvements
+-   Assigning milestones to teammates and marking them done
 -   AI teammate recommendations
 -   Calendar and deadline management
